@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Silent Cutter - Flow</title>
+    <meta name="description" content="AI-powered web application that automatically detects and cuts silent parts of your videos, right in your browser.">
+    
+    <!-- Google Fonts for modern typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        /*
+         * ==================================================================
+         *  STYLE - A design inspired by Apple's Pro apps and modern aesthetics.
+         * ==================================================================
+         */
+        :root {
+            --color-background: #121212;
+            --color-surface: #1e1e1e;
+            --color-primary: #0A84FF;
+            --color-primary-light: rgba(10, 132, 255, 0.1);
+            --color-text-primary: #ffffff;
+            --color-text-secondary: #8e8e93;
+            --color-border: rgba(255, 255, 255, 0.1);
+            --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            --border-radius: 12px;
+            --transition-speed: 0.3s;
+        }
+
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html {
+            color-scheme: dark;
+        }
+
+        body {
+            font-family: var(--font-family);
+            background-color: var(--color-background);
+            color: var(--color-text-primary);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 2rem;
+            overflow: hidden;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1200px;
+            height: 90vh;
+            max-height: 800px;
+            background: var(--color-surface);
+            border-radius: var(--border-radius);
+            border: 1px solid var(--color-border);
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+            display: flex;
+            overflow: hidden;
+            transition: all var(--transition-speed) ease;
+        }
+
+        /* Sidebar for controls */
+        .sidebar {
+            width: 320px;
+            padding: 24px;
+            border-right: 1px solid var(--color-border);
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            transition: all var(--transition-speed) ease;
+        }
+
+        .sidebar-header h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+        .sidebar-header p {
+            font-size: 0.9rem;
+            color: var(--color-text-secondary);
+            margin-top: 4px;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .control-group label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--color-text-secondary);
+        }
+
+        .control-group .value-display {
+            font-weight: 600;
+            color: var(--color-text-primary);
+        }
+
+        /* Custom Slider */
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 4px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 2px;
+            outline: none;
+            cursor: pointer;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            background: var(--color-text-primary);
+            border-radius: 50%;
+            border: 2px solid var(--color-surface);
+            transition: transform 0.1s ease;
+        }
+
+        input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.1);
+        }
+        
+        input[type="range"]::-moz-range-thumb {
+             width: 16px;
+            height: 16px;
+            background: var(--color-text-primary);
+            border-radius: 50%;
+            border: 2px solid var(--color-surface);
+            transition: transform 0.1s ease;
+        }
+        
+        input[type="range"]::-moz-range-thumb:hover {
+             transform: scale(1.1);
+        }
+
+        .action-button {
+            width: 100%;
+            padding: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            color: #fff;
+            background-color: var(--color-primary);
+            border: none;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            transition: background-color var(--transition-speed) ease;
+            margin-top: auto; /* Pushes button to the bottom */
+        }
+
+        .action-button:disabled {
+            background-color: #555;
+            cursor: not-allowed;
+        }
+        
+        .action-button:not(:disabled):hover {
+            background-color: #0077ee;
+        }
+
+        /* Main content area for video */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 24px;
+            position: relative;
+        }
+
+        #drop-zone {
+            width: 100%;
+            height: 100%;
+            border: 2px dashed var(--color-border);
+            border-radius: var(--border-radius);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            color: var(--color-text-secondary);
+            transition: all var(--transition-speed) ease;
+        }
+
+        #drop-zone.dragover {
+            border-color: var(--color-primary);
+            background-color: var(--color-primary-light);
+        }
+
+        #drop-zone.hidden {
+            display: none;
+        }
+        
+        #video-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 16px;
+        }
+
+        video {
+            width: 100%;
+            max-height: calc(100% - 60px); /* Space for timeline */
+            border-radius: var(--border-radius);
+            background-color: #000;
+        }
+
+        .timeline {
+            width: 100%;
+            height: 20px;
+            background-color: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            position: relative;
+            cursor: pointer;
+        }
+        
+        #timeline-segments {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        
+        .segment {
+            height: 100%;
+        }
+
+        .segment.silent {
+            background-color: rgba(255, 80, 80, 0.5);
+        }
+
+        .segment.voiced {
+            background-color: var(--color-primary);
+        }
+        
+        #progress-bar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 0%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.7);
+            border-radius: 10px;
+            pointer-events: none;
+        }
+
+        /* Loading Overlay */
+        #loader {
+            position: absolute;
+            inset: 0;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(5px);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity var(--transition-speed) ease;
+        }
+        
+        #loader.visible {
+            opacity: 1;
+            pointer-events: all;
+        }
+        
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid var(--color-border);
+            border-top-color: var(--color-primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        #loader p {
+            margin-top: 16px;
+            color: var(--color-text-secondary);
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Responsive Design */
+        @media (max-width: 900px) {
+            body {
+                padding: 0;
+                align-items: flex-start;
+            }
+            .container {
+                flex-direction: column;
+                height: 100vh;
+                max-height: none;
+                border-radius: 0;
+            }
+            .sidebar {
+                width: 100%;
+                border-right: none;
+                border-bottom: 1px solid var(--color-border);
+                flex-direction: row;
+                flex-wrap: wrap;
+                align-items: center;
+            }
+            .sidebar-header { flex-basis: 100%; }
+            .control-group { flex: 1; min-width: 200px; }
+            .action-button { margin-top: 0; }
+            .main-content {
+                padding: 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <!-- ==== SIDEBAR - Controls ==== -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h1>Silent Cutter</h1>
+                <p>Flow Edition</p>
+            </div>
+
+            <div class="control-group">
+                <label for="threshold">Threshold <span id="threshold-value" class="value-display">-40 dB</span></label>
+                <input type="range" id="threshold" min="-60" max="-20" value="-40" step="1">
+            </div>
+            
+            <div class="control-group">
+                <label for="chunk-size">Chunk Size <span id="chunk-size-value" class="value-display">50 ms</span></label>
+                <input type="range" id="chunk-size" min="10" max="200" value="50" step="5">
+            </div>
+
+            <div class="control-group">
+                <label for="min-silence">Min Silence <span id="min-silence-value" class="value-display">500 ms</span></label>
+                <input type="range" id="min-silence" min="100" max="2000" value="500" step="50">
+            </div>
+
+            <div class="control-group">
+                <label for="padding">Padding <span id="padding-value" class="value-display">150 ms</span></label>
+                <input type="range" id="padding" min="0" max="500" value="150" step="10">
+            </div>
+
+            <button id="export-button" class="action-button" disabled>Export (Soon)</button>
+        </aside>
+
+        <!-- ==== MAIN CONTENT - Video & Drop Zone ==== -->
+        <main class="main-content">
+            <div id="drop-zone">
+                <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-text-secondary);"><path d="M21.2 15c.7-1.2 1-2.5.7-3.9-.6-2.4-2.4-4.2-4.8-4.8-1.4-.3-2.7-.1-3.9.7L4 4 2 6l10 10 2-2 3.9 3.9c1.2.7 2.5 1 3.9.7 2.4-.6 4.2-2.4 4.8-4.8.3-1.4.1-2.7-.7-3.9z"></path><path d="m2 6 4 4"></path><path d="m18 14 2 2"></path></svg>
+                <p>Drag & Drop a video file here</p>
+                <p>or</p>
+                <button id="file-select-button" class="action-button" style="width: auto; padding: 10px 20px;">Select File</button>
+                <input type="file" id="file-input" accept="video/mp4,video/webm,video/quicktime" style="display: none;">
+            </div>
+
+            <div id="video-container" class="hidden">
+                <video id="video-preview"></video>
+                <div class="timeline" id="timeline">
+                    <div id="timeline-segments"></div>
+                    <div id="progress-bar"></div>
+                </div>
+            </div>
+
+            <div id="loader">
+                <div class="spinner"></div>
+                <p id="loader-text">Analyzing audio...</p>
+            </div>
+        </main>
+    </div>
+
+    <script type="module">
+        /**
+         * ==================================================================
+         *  SCRIPT - Application Logic (TypeScript transpiled)
+         * ==================================================================
+         * @typedef {object} SilenceDetectionOptions
+         * @property {number} threshold - The volume threshold in dBFS.
+         * @property {number} chunkSize - The analysis interval in milliseconds.
+         * @property {number} minSilenceDuration - The minimum duration of a silent part in milliseconds.
+         * @property {number} padding - The margin to add around silent parts in milliseconds.
+         */
+
+        /**
+         * @typedef {object} TimeRange
+         * @property {number} start - Start time in seconds.
+         * @property {number} end - End time in seconds.
+         */
+        
+        class App {
+            /** @type {File | null} */
+            videoFile = null;
+            /** @type {TimeRange[]} */
+            voicedSegments = [];
+            /** @type {number} */
+            currentSegmentIndex = 0;
+            /** @type {boolean} */
+            isPlaying = false;
+            /** @type {Worker | null} */
+            analyzerWorker = null;
+            
+            constructor() {
+                this.elements = {
+                    dropZone: document.getElementById('drop-zone'),
+                    videoContainer: document.getElementById('video-container'),
+                    videoPreview: document.getElementById('video-preview'),
+                    fileInput: document.getElementById('file-input'),
+                    fileSelectButton: document.getElementById('file-select-button'),
+                    loader: document.getElementById('loader'),
+                    loaderText: document.getElementById('loader-text'),
+                    timeline: document.getElementById('timeline'),
+                    timelineSegments: document.getElementById('timeline-segments'),
+                    progressBar: document.getElementById('progress-bar'),
+                    controls: {
+                        threshold: document.getElementById('threshold'),
+                        chunkSize: document.getElementById('chunk-size'),
+                        minSilence: document.getElementById('min-silence'),
+                        padding: document.getElementById('padding'),
+                    },
+                    valueDisplays: {
+                        threshold: document.getElementById('threshold-value'),
+                        chunkSize: document.getElementById('chunk-size-value'),
+                        minSilence: document.getElementById('min-silence-value'),
+                        padding: document.getElementById('padding-value'),
+                    }
+                };
+                
+                this.bindEvents();
+                this.initWorker();
+            }
+            
+            /**
+             * Initializes the Web Worker for audio analysis.
+             */
+            initWorker() {
+                // Inlined Worker code using a Blob
+                const workerCode = `
+                    let wasm;
+                    self.onmessage = async (event) => {
+                        const { type, payload } = event.data;
+
+                        if (type === 'INIT_WASM') {
+                            try {
+                                const { wasmBytes } = payload;
+                                const wasmModule = await WebAssembly.compile(wasmBytes);
+                                wasm = await WebAssembly.instantiate(wasmModule);
+                                self.postMessage({ type: 'WASM_READY' });
+                            } catch (error) {
+                                self.postMessage({ type: 'ERROR', payload: 'Failed to initialize WASM: ' + error.message });
+                            }
+                        } else if (type === 'ANALYZE') {
+                            if (!wasm) {
+                                self.postMessage({ type: 'ERROR', payload: 'WASM not initialized.' });
+                                return;
+                            }
+                            try {
+                                const { file, options } = payload;
+                                const buffer = await file.arrayBuffer();
+                                
+                                // Create an OfflineAudioContext to decode the audio without playing it.
+                                // It's faster and works in a worker.
+                                const audioCtx = new OfflineAudioContext(1, 1, 44100);
+                                const decodedBuffer = await audioCtx.decodeAudioData(buffer);
+                                const channelData = decodedBuffer.getChannelData(0); // Use the first channel
+                                
+                                self.postMessage({ type: 'PROGRESS', payload: 'Analyzing with WASM...' });
+
+                                // Call the Rust/WASM function
+                                const resultPtr = wasm.instance.exports.find_voiced_segments(
+                                    channelData.length,
+                                    decodedBuffer.sampleRate,
+                                    options.threshold,
+                                    options.chunkSize,
+                                    options.minSilenceDuration,
+                                    options.padding
+                                );
+                                
+                                // Assuming the WASM function returns a pointer to a JSON string
+                                const memory = new Uint8Array(wasm.instance.exports.memory.buffer);
+                                let resultStr = '';
+                                let i = resultPtr;
+                                while (memory[i] !== 0) {
+                                    resultStr += String.fromCharCode(memory[i++]);
+                                }
+                                wasm.instance.exports.free_string(resultPtr); // Free the memory in WASM
+                                
+                                const segments = JSON.parse(resultStr);
+
+                                self.postMessage({ type: 'RESULT', payload: { segments, duration: decodedBuffer.duration } });
+                            } catch(e) {
+                                self.postMessage({ type: 'ERROR', payload: 'Analysis failed: ' + e.message });
+                            }
+                        }
+                    };
+                `;
+                const blob = new Blob([workerCode.replace("wasm.instance.exports.find_voiced_segments", "wasm.find_voiced_segments")], { type: 'application/javascript' });
+                this.analyzerWorker = new Worker(URL.createObjectURL(blob));
+
+                // Fetch WASM and send to worker
+                fetch('analyzer.wasm')
+                    .then(response => response.arrayBuffer())
+                    .then(bytes => {
+                        this.analyzerWorker.postMessage({ type: 'INIT_WASM', payload: { wasmBytes: bytes } });
+                    })
+                    .catch(e => console.error("Failed to load WASM module", e));
+                    
+                this.analyzerWorker.onmessage = (event) => {
+                    const { type, payload } = event.data;
+                    if (type === 'WASM_READY') {
+                        console.log('Analyzer worker is ready.');
+                    } else if (type === 'PROGRESS') {
+                        this.showLoader(payload);
+                    } else if (type === 'RESULT') {
+                        this.voicedSegments = payload.segments;
+                        this.updateTimeline(payload.duration);
+                        this.setupVideoPlayback(payload.duration);
+                        this.hideLoader();
+                    } else if (type === 'ERROR') {
+                        alert(`An error occurred: ${payload}`);
+                        this.hideLoader();
+                    }
+                };
+            }
+
+            /**
+             * Binds all necessary DOM events.
+             */
+            bindEvents() {
+                this.elements.dropZone.addEventListener('dragover', this.handleDragOver.bind(this));
+                this.elements.dropZone.addEventListener('dragleave', this.handleDragLeave.bind(this));
+                this.elements.dropZone.addEventListener('drop', this.handleDrop.bind(this));
+                
+                this.elements.fileInput.addEventListener('change', this.handleFileSelect.bind(this));
+                this.elements.fileSelectButton.addEventListener('click', () => this.elements.fileInput.click());
+                
+                Object.values(this.elements.controls).forEach(control => {
+                    control.addEventListener('input', this.handleControlChange.bind(this));
+                    control.addEventListener('change', this.handleAnalysisRequest.bind(this)); // Re-analyze on release
+                });
+
+                this.elements.videoPreview.addEventListener('play', () => { this.isPlaying = true; });
+                this.elements.videoPreview.addEventListener('pause', () => { this.isPlaying = false; });
+                this.elements.videoPreview.addEventListener('timeupdate', this.handleTimeUpdate.bind(this));
+                this.elements.timeline.addEventListener('click', this.handleTimelineClick.bind(this));
+            }
+
+            handleDragOver(e) {
+                e.preventDefault();
+                this.elements.dropZone.classList.add('dragover');
+            }
+
+            handleDragLeave(e) {
+                e.preventDefault();
+                this.elements.dropZone.classList.remove('dragover');
+            }
+
+            handleDrop(e) {
+                e.preventDefault();
+                this.elements.dropZone.classList.remove('dragover');
+                const file = e.dataTransfer.files[0];
+                if (file && file.type.startsWith('video/')) {
+                    this.loadFile(file);
+                }
+            }
+            
+            handleFileSelect(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    this.loadFile(file);
+                }
+            }
+            
+            /**
+             * @param {File} file The video file to load and process.
+             */
+            loadFile(file) {
+                this.videoFile = file;
+                const videoURL = URL.createObjectURL(file);
+                this.elements.videoPreview.src = videoURL;
+                this.elements.dropZone.classList.add('hidden');
+                this.elements.videoContainer.classList.remove('hidden');
+                
+                this.handleAnalysisRequest();
+            }
+
+            handleControlChange(e) {
+                const { id, value } = e.target;
+                const display = this.elements.valueDisplays[id];
+                if (!display) return;
+                
+                let unit = '';
+                switch (id) {
+                    case 'threshold': unit = ' dB'; break;
+                    case 'chunkSize':
+                    case 'minSilence':
+                    case 'padding': unit = ' ms'; break;
+                }
+                display.textContent = `${value}${unit}`;
+            }
+
+            /**
+             * Gathers current settings and requests analysis from the worker.
+             */
+            handleAnalysisRequest() {
+                if (!this.videoFile) return;
+                
+                const options = {
+                    threshold: parseFloat(this.elements.controls.threshold.value),
+                    chunkSize: parseInt(this.elements.controls.chunkSize.value),
+                    minSilenceDuration: parseInt(this.elements.controls.minSilence.value),
+                    padding: parseInt(this.elements.controls.padding.value),
+                };
+
+                this.showLoader('Decoding audio...');
+                this.analyzerWorker.postMessage({
+                    type: 'ANALYZE',
+                    payload: {
+                        file: this.videoFile,
+                        options: options
+                    }
+                });
+            }
+
+            /**
+             * Sets up the video for segmented playback.
+             * @param {number} totalDuration The total duration of the video.
+             */
+            setupVideoPlayback(totalDuration) {
+                this.elements.videoPreview.controls = true; // Enable native controls
+                this.currentSegmentIndex = 0;
+                
+                if (this.voicedSegments.length > 0) {
+                    this.elements.videoPreview.currentTime = this.voicedSegments[0].start;
+                }
+            }
+
+            handleTimeUpdate() {
+                if (!this.isPlaying || this.voicedSegments.length === 0) return;
+
+                const currentTime = this.elements.videoPreview.currentTime;
+                const currentSegment = this.voicedSegments[this.currentSegmentIndex];
+
+                if (!currentSegment) return;
+                
+                // If playback goes beyond the current voiced segment, jump to the next one.
+                if (currentTime >= currentSegment.end) {
+                    this.currentSegmentIndex++;
+                    if (this.currentSegmentIndex < this.voicedSegments.length) {
+                        const nextSegment = this.voicedSegments[this.currentSegmentIndex];
+                        this.elements.videoPreview.currentTime = nextSegment.start;
+                    } else {
+                        // Reached the end
+                        this.elements.videoPreview.pause();
+                        this.currentSegmentIndex = 0; // Reset for next playback
+                    }
+                }
+                
+                // Update progress bar
+                const totalDuration = this.elements.videoPreview.duration;
+                if(totalDuration > 0) {
+                    this.elements.progressBar.style.width = `${(currentTime / totalDuration) * 100}%`;
+                }
+            }
+            
+            /**
+             * @param {MouseEvent} e
+             */
+            handleTimelineClick(e) {
+                const totalDuration = this.elements.videoPreview.duration;
+                if (!totalDuration) return;
+
+                const rect = this.elements.timeline.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const clickRatio = clickX / rect.width;
+                const targetTime = clickRatio * totalDuration;
+
+                // Find which segment the user clicked on
+                const targetSegmentIndex = this.voicedSegments.findIndex(seg => targetTime >= seg.start && targetTime <= seg.end);
+                
+                if (targetSegmentIndex !== -1) {
+                    this.currentSegmentIndex = targetSegmentIndex;
+                    this.elements.videoPreview.currentTime = targetTime;
+                } else {
+                    // If clicked on a silent part, find the nearest voiced part to start from
+                    let closestSegmentIndex = 0;
+                    let minDistance = Infinity;
+                    this.voicedSegments.forEach((seg, index) => {
+                        const dist = Math.min(Math.abs(targetTime - seg.start), Math.abs(targetTime - seg.end));
+                        if (dist < minDistance) {
+                            minDistance = dist;
+                            closestSegmentIndex = index;
+                        }
+                    });
+                    this.currentSegmentIndex = closestSegmentIndex;
+                    this.elements.videoPreview.currentTime = this.voicedSegments[closestSegmentIndex].start;
+                }
+            }
+
+            /**
+             * Updates the visual timeline based on analysis results.
+             * @param {number} totalDuration
+             */
+            updateTimeline(totalDuration) {
+                this.elements.timelineSegments.innerHTML = '';
+                if (this.voicedSegments.length === 0) return;
+                
+                let lastEnd = 0;
+                this.voicedSegments.forEach(segment => {
+                    const silenceDuration = segment.start - lastEnd;
+                    if (silenceDuration > 0.01) {
+                        this.createSegment(silenceDuration / totalDuration, 'silent');
+                    }
+                    this.createSegment((segment.end - segment.start) / totalDuration, 'voiced');
+                    lastEnd = segment.end;
+                });
+                
+                // Add final silent segment if any
+                if(totalDuration - lastEnd > 0.01) {
+                     this.createSegment((totalDuration - lastEnd) / totalDuration, 'silent');
+                }
+            }
+
+            createSegment(widthRatio, type) {
+                const segmentEl = document.createElement('div');
+                segmentEl.className = `segment ${type}`;
+                segmentEl.style.width = `${widthRatio * 100}%`;
+                this.elements.timelineSegments.appendChild(segmentEl);
+            }
+
+            showLoader(text) {
+                this.elements.loaderText.textContent = text;
+                this.elements.loader.classList.add('visible');
+            }
+
+            hideLoader() {
+                this.elements.loader.classList.remove('visible');
+            }
+        }
+        
+        new App();
+    </script>
+</body>
+</html>
