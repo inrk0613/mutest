@@ -1,422 +1,599 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Silent Clipper | AI-Powered Video Silence Remover</title>
-
-    <!-- 【重要】COOP/COEP不要版のライブラリに差し替え -->
-    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/ffmpeg.min.js"></script>
-    <script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/util.min.js"></script>
-
-    <style>
-        :root {
-            --bg-color: #121212;
-            --surface-color: #1e1e1e;
-            --primary-color: #0A84FF;
-            --text-color: #e0e0e0;
-            --text-secondary-color: #888;
-            --border-color: #333;
-            --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            --border-radius: 12px;
-            --transition-speed: 0.3s;
-        }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        html, body { height: 100%; overflow: hidden; }
-        body {
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            font-family: var(--font-family);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            font-size: 16px;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
-        }
-        .app-container {
-            width: 100%;
-            max-width: 1200px;
-            height: 95vh;
-            max-height: 900px;
-            background-color: var(--surface-color);
-            border-radius: var(--border-radius);
-            box-shadow: 0 20px 50px rgba(0,0,0,0.3);
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-        header { padding: 1rem 1.5rem; border-bottom: 1px solid var(--border-color); flex-shrink: 0; }
-        header h1 { font-size: 1.25rem; font-weight: 600; }
-        main { display: flex; flex-grow: 1; height: 100%; min-height: 0; }
-        .video-panel { flex-grow: 1; padding: 1.5rem; display: flex; flex-direction: column; }
-        .controls-panel { width: 320px; flex-shrink: 0; border-left: 1px solid var(--border-color); padding: 1.5rem; overflow-y: auto; }
-        .file-drop-zone {
-            flex-grow: 1; border: 2px dashed var(--border-color); border-radius: var(--border-radius);
-            display: flex; flex-direction: column; justify-content: center; align-items: center;
-            text-align: center; cursor: pointer; transition: background-color var(--transition-speed), border-color var(--transition-speed);
-        }
-        .file-drop-zone.dragover { background-color: rgba(10, 132, 255, 0.1); border-color: var(--primary-color); }
-        .file-drop-zone h2 { font-size: 1.5rem; margin-bottom: 0.5rem; }
-        .file-drop-zone p { color: var(--text-secondary-color); }
-        #fileInput { display: none; }
-        .video-wrapper {
-            position: relative; width: 100%; flex-grow: 1; background-color: #000;
-            border-radius: var(--border-radius); overflow: hidden; display: none;
-        }
-        #videoPlayer { width: 100%; height: 100%; display: block; }
-        #histogramCanvas { width: 100%; height: 80px; margin-top: 1rem; border-radius: 4px; background-color: #2a2a2a; display: none; }
-        .loader-overlay {
-            position: absolute; inset: 0; background-color: rgba(0,0,0,0.7);
-            display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 10;
-        }
-        .spinner {
-            width: 50px; height: 50px; border: 4px solid var(--border-color);
-            border-top-color: var(--primary-color); border-radius: 50%; animation: spin 1s linear infinite;
-        }
-        #progressText { margin-top: 1rem; color: var(--text-color); font-size: 0.9rem; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .controls-panel h3 { font-size: 1.1rem; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; }
-        .control-group { margin-bottom: 1.5rem; }
-        .control-group label { display: flex; justify-content: space-between; margin-bottom: 0.75rem; font-size: 0.9rem; font-weight: 500; }
-        .control-group .value { color: var(--text-secondary-color); font-weight: 400; }
-        .slider { -webkit-appearance: none; width: 100%; height: 4px; background: var(--border-color); outline: none; border-radius: 2px; }
-        .slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; background: var(--primary-color); cursor: pointer; border-radius: 50%; }
-        .slider::-moz-range-thumb { width: 18px; height: 18px; background: var(--primary-color); cursor: pointer; border-radius: 50%; border: none; }
-        #exportButton {
-            width: 100%; padding: 12px; font-size: 1rem; font-weight: 600; color: #fff; background-color: var(--primary-color);
-            border: none; border-radius: 8px; cursor: pointer; transition: background-color var(--transition-speed);
-        }
-        #exportButton:hover:not(:disabled) { background-color: #0077ED; }
-        #exportButton:disabled { background-color: var(--border-color); color: var(--text-secondary-color); cursor: not-allowed; }
-        .hidden { display: none !important; }
-        @media (max-width: 900px) {
-            body { align-items: flex-start; }
-            .app-container { flex-direction: column; height: 100vh; max-height: none; border-radius: 0; }
-            main { flex-direction: column; }
-            .controls-panel { width: 100%; border-left: none; border-top: 1px solid var(--border-color); max-height: 40vh; }
-        }
-    </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Silence Cutter — 無音カット（ブラウザ完結）</title>
+<style>
+  /* ====== シンプルで洗練された UI (Apple的な余白とタイポグラフィ) ====== */
+  :root{
+    --bg:#0f1720; --card:#0b1220; --muted:#9aa6b2; --accent:#0ea5a4;
+    --glass: rgba(255,255,255,0.03);
+    --radius:14px;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif;
+  }
+  html,body{height:100%;margin:0;background:linear-gradient(180deg,#071021 0%, #071526 60%);font-family:var(--font-sans);color:#e6eef6}
+  .wrap{max-width:1100px;margin:32px auto;padding:28px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border-radius:16px;box-shadow:0 8px 30px rgba(5,8,15,0.7)}
+  header{display:flex;gap:18px;align-items:center;margin-bottom:18px}
+  .logo{width:56px;height:56px;border-radius:12px;background:linear-gradient(135deg,var(--accent),#2563eb);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px}
+  h1{margin:0;font-size:20px}
+  p.lead{margin:2px 0 0;color:var(--muted);font-size:13px}
+  .main{display:grid;grid-template-columns: 1fr 420px;gap:20px;margin-top:18px}
+  @media(max-width:980px){.main{grid-template-columns:1fr}}
+  .card{background:var(--card);padding:16px;border-radius:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,0.02)}
+  .dropzone{border:2px dashed rgba(255,255,255,0.04);padding:20px;border-radius:10px;text-align:center;cursor:pointer}
+  .dropzone.dragover{border-color:rgba(14,165,164,0.8);box-shadow:0 6px 24px rgba(14,165,164,0.06)}
+  input[type=file]{display:none}
+  .controls{display:flex;flex-direction:column;gap:12px}
+  label.range{display:flex;flex-direction:column;gap:6px}
+  .rangeRow{display:flex;gap:12px;align-items:center}
+  .rangeRow input[type=range]{flex:1}
+  .val{min-width:72px;text-align:right;color:var(--muted);font-size:13px}
+  canvas.hist{width:100%;height:120px;border-radius:8px;background:var(--glass);display:block}
+  .progress{height:8px;background:rgba(255,255,255,0.04);border-radius:999px;overflow:hidden}
+  .progress > i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),#60a5fa)}
+  .small{font-size:12px;color:var(--muted)}
+  .muted{color:var(--muted)}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:10px;background:linear-gradient(90deg,var(--accent),#60a5fa);color:#012;cursor:pointer;border:none;font-weight:700}
+  .outline{background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted)}
+  .list{max-height:200px;overflow:auto;padding:8px;border-radius:8px;background:rgba(255,255,255,0.01)}
+  .meta{display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .spinner{width:28px;height:28px;border-radius:50%;border:3px solid rgba(255,255,255,0.08);border-top-color:var(--accent);animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  footer{margin-top:18px;color:var(--muted);font-size:13px;text-align:right}
+  .seglist{font-family:monospace;font-size:13px}
+  video{width:100%;border-radius:10px;background:black;display:block}
+</style>
 </head>
 <body>
-    <div class="app-container">
-        <header><h1>Silent Clipper</h1></header>
-        <main>
-            <div class="video-panel">
-                <div class="file-drop-zone" id="fileDropZone">
-                    <input type="file" id="fileInput" accept="video/mp4,video/webm,video/quicktime,video/*">
-                    <h2>ビデオファイルをドラッグ＆ドロップ</h2>
-                    <p>またはクリックしてファイルを選択</p>
-                </div>
-                <div class="video-wrapper" id="videoWrapper">
-                    <video id="videoPlayer" controls></video>
-                    <div class="loader-overlay hidden" id="loaderOverlay">
-                        <div class="spinner"></div>
-                        <p id="progressText">準備中...</p>
-                    </div>
-                </div>
-                <canvas id="histogramCanvas"></canvas>
-            </div>
-            <aside class="controls-panel" id="controlsPanel">
-                <div class="export-section" style="margin-bottom: 1.5rem;">
-                    <button id="exportButton" disabled>書き出し</button>
-                    <div id="exportProgress" class="hidden" style="margin-top: 0.75rem;">
-                        <p id="exportProgressText" style="font-size: 0.9rem; margin-bottom: 0.5rem;"></p>
-                        <progress id="exportProgressBar" value="0" max="100" style="width: 100%;"></progress>
-                    </div>
-                </div>
-                <h3>設定</h3>
-                <div class="control-group">
-                    <label>無音しきい値 <span class="value" id="thresholdValue">-40 dB</span></label>
-                    <input type="range" min="-60" max="-20" value="-40" class="slider" id="thresholdSlider" disabled>
-                </div>
-                <div class="control-group">
-                    <label>解析間隔 <span class="value" id="chunkSizeValue">50 ms</span></label>
-                    <input type="range" min="10" max="200" value="50" step="10" class="slider" id="chunkSizeSlider" disabled>
-                </div>
-                <div class="control-group">
-                    <label>最小無音長 <span class="value" id="minSilenceValue">500 ms</span></label>
-                    <input type="range" min="100" max="2000" value="500" step="50" class="slider" id="minSilenceSlider" disabled>
-                </div>
-                <div class="control-group">
-                    <label>マージン <span class="value" id="paddingValue">100 ms</span></label>
-                    <input type="range" min="0" max="500" value="100" step="10" class="slider" id="paddingSlider" disabled>
-                </div>
-            </aside>
-        </main>
+<div class="wrap" role="application" aria-label="Silence Cutter">
+  <header>
+    <div class="logo">SC</div>
+    <div>
+      <h1>Silence Cutter</h1>
+      <p class="lead">動画の無音部分をブラウザ内で自動検出・プレビュー（ファイルは外部送信しません）</p>
+    </div>
+  </header>
+
+  <div class="main">
+    <!-- LEFT: ツールと結果 -->
+    <div class="card" id="left">
+      <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="動画を追加">
+        <div style="font-weight:700">ここに動画をドロップ</div>
+        <div class="small muted">または <button id="pickBtn" class="outline btn">ファイルを選択</button></div>
+        <input type="file" id="fileInput" accept="video/mp4,video/webm,video/quicktime,video/*">
+      </div>
+
+      <div style="margin-top:12px;display:flex;gap:12px;align-items:center;">
+        <div class="meta">
+          <div class="small muted">解析ステータス</div>
+        </div>
+        <div style="flex:1">
+          <div class="progress" aria-hidden="true"><i id="progressBar"></i></div>
+        </div>
+        <div id="statusText" class="small muted">待機中</div>
+      </div>
+
+      <div style="margin-top:14px" class="controls">
+        <label class="range">
+          <div class="rangeRow"><div>Threshold (dB)</div><div class="val" id="thVal">-50 dB</div></div>
+          <input id="threshold" type="range" min="-80" max="-12" step="1" value="-50">
+        </label>
+
+        <label class="range">
+          <div class="rangeRow"><div>Chunk (ms)</div><div class="val" id="chunkVal">50 ms</div></div>
+          <input id="chunk" type="range" min="10" max="200" step="5" value="50">
+        </label>
+
+        <label class="range">
+          <div class="rangeRow"><div>Min Silence (ms)</div><div class="val" id="minSilenceVal">300 ms</div></div>
+          <input id="minSilence" type="range" min="50" max="2000" step="50" value="300">
+        </label>
+
+        <label class="range">
+          <div class="rangeRow"><div>Padding (ms)</div><div class="val" id="padVal">150 ms</div></div>
+          <input id="padding" type="range" min="0" max="1000" step="10" value="150">
+        </label>
+
+        <div>
+          <canvas id="histogram" class="hist" aria-label="音量ヒストグラム"></canvas>
+          <div class="small muted" style="margin-top:6px">ヒストグラムはチャンク毎の dB 分布を示します</div>
+        </div>
+
+        <div style="display:flex;gap:10px;align-items:center;margin-top:6px">
+          <button id="analyzeBtn" class="btn">解析を実行</button>
+          <button id="clearBtn" class="outline btn">クリア</button>
+          <div style="margin-left:auto" id="analyzeSpinner" hidden><div class="spinner" aria-hidden="true"></div></div>
+        </div>
+      </div>
+
+      <div style="margin-top:14px">
+        <div class="small muted">無音区間（開始 → 終了）</div>
+        <div class="list seglist" id="silenceList">—</div>
+      </div>
+
+      <div style="margin-top:10px">
+        <div class="small muted">音声あり区間</div>
+        <div class="list seglist" id="soundList">—</div>
+      </div>
     </div>
 
-    <script type="module">
-    // --- STATE & DOM ---
-    const state = { videoFile: null, videoObjectURL: null, audioData: null, sampleRate: 0, soundZones: [], isProcessing: false, currentSoundZoneIndex: 0 };
-    const dom = {
-        fileDropZone: document.getElementById('fileDropZone'), fileInput: document.getElementById('fileInput'),
-        videoWrapper: document.getElementById('videoWrapper'), videoPlayer: document.getElementById('videoPlayer'),
-        loaderOverlay: document.getElementById('loaderOverlay'), progressText: document.getElementById('progressText'),
-        histogramCanvas: document.getElementById('histogramCanvas'), controlsPanel: document.getElementById('controlsPanel'),
-        thresholdSlider: document.getElementById('thresholdSlider'), chunkSizeSlider: document.getElementById('chunkSizeSlider'),
-        minSilenceSlider: document.getElementById('minSilenceSlider'), paddingSlider: document.getElementById('paddingSlider'),
-        thresholdValue: document.getElementById('thresholdValue'), chunkSizeValue: document.getElementById('chunkSizeValue'),
-        minSilenceValue: document.getElementById('minSilenceValue'), paddingValue: document.getElementById('paddingValue'),
-        exportButton: document.getElementById('exportButton'), exportProgress: document.getElementById('exportProgress'),
-        exportProgressText: document.getElementById('exportProgressText'), exportProgressBar: document.getElementById('exportProgressBar'),
-    };
-    const histogramCtx = dom.histogramCanvas.getContext('2d');
+    <!-- RIGHT: プレビュー領域 -->
+    <div class="card">
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
+        <div style="flex:1"><strong id="filename">ファイル未選択</strong><div class="small muted" id="filemeta"></div></div>
+        <div style="text-align:right"><button id="playPreview" class="btn outline">プレビュー再生</button></div>
+      </div>
 
-    // --- WEB WORKER ---
-    const workerCode = `
-        self.onmessage = async (e) => {
-            const { type, payload } = e.data;
-            if (type !== 'ANALYZE') return;
+      <video id="video" controls playsinline></video>
 
-            const { audioData, sampleRate, params } = payload;
-            const chunkSamples = Math.floor(sampleRate * (params.chunkSize / 1000));
-            const numChunks = Math.floor(audioData.length / chunkSamples);
-            const volumes = new Float32Array(numChunks);
-            for (let i = 0; i < numChunks; i++) {
-                let sumOfSquares = 0;
-                const start = i * chunkSamples;
-                const end = start + chunkSamples;
-                for (let j = start; j < end; j++) { sumOfSquares += audioData[j] * audioData[j]; }
-                const rms = Math.sqrt(sumOfSquares / chunkSamples);
-                volumes[i] = (rms > 0) ? 20 * Math.log10(rms) : -144;
-            }
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+        <div class="small muted">再生モード:</div>
+        <div class="small"> <label><input type="checkbox" id="skipSilence" checked> 無音をスキップして再生</label></div>
+      </div>
 
-            const chunkSizeSeconds = params.chunkSize / 1000;
-            const paddingSeconds = params.padding / 1000;
-            const minSilenceChunks = Math.ceil(params.minSilenceDuration / params.chunkSize);
-            
-            const soundZones = [];
-            let lastSoundChunk = -1;
-            for(let i=0; i < volumes.length; i++) {
-                if(volumes[i] >= params.threshold) {
-                    if (lastSoundChunk === -1) { // Start of a new sound zone
-                         soundZones.push({ start: i * chunkSizeSeconds, end: (i + 1) * chunkSizeSeconds });
-                    } else if ((i - lastSoundChunk) * params.chunkSize < params.minSilenceDuration) { // Merge with previous zone
-                        soundZones[soundZones.length - 1].end = (i + 1) * chunkSizeSeconds;
-                    } else { // New zone after a long silence
-                         soundZones.push({ start: i * chunkSizeSeconds, end: (i + 1) * chunkSizeSeconds });
-                    }
-                    lastSoundChunk = i;
-                }
-            }
+      <div style="margin-top:10px" class="small muted">ログ</div>
+      <pre id="log" style="height:120px;overflow:auto;background:rgba(0,0,0,0.25);padding:8px;border-radius:8px;color:#dff6fb"></pre>
+    </div>
+  </div>
 
-            const paddedZones = soundZones.map(zone => ({
-                start: Math.max(0, zone.start - paddingSeconds),
-                end: zone.end + paddingSeconds
-            }));
-            
-            self.postMessage({
-                type: 'ANALYSIS_COMPLETE',
-                payload: { soundZones: paddedZones, volumes: volumes, audioDataBuffer: audioData.buffer }
-            }, [audioData.buffer]);
-        };
-    `;
-    const worker = new Worker(URL.createObjectURL(new Blob([workerCode], { type: 'application/javascript' })));
+  <footer>静的ホスティング対応 — Client-only. &nbsp;データはどこにも送られません。</footer>
+</div>
 
-    // --- FFmpeg ---
-    let ffmpeg;
-    async function loadFFmpeg() {
-        if (ffmpeg && ffmpeg.loaded) return;
-        const { FFmpeg } = window.FFmpeg;
-        const { toBlobURL } = window.FFmpegUtil;
-        ffmpeg = new FFmpeg();
-        ffmpeg.on('log', ({ message }) => console.log(message));
-        ffmpeg.on('progress', ({ progress }) => {
-            if (progress > 0 && progress <= 1) {
-                dom.exportProgressBar.value = Math.round(progress * 100);
-            }
-        });
-        setProcessingState(true, 'コアエンジンをロード中...');
-        
-        // 【重要】COOP/COEP問題を回避するため、-mt (multi-thread) 版のコアをロードする
-        const baseURL = "https://unpkg.com/@ffmpeg/core-mt@0.12.6/dist/esm";
-        await ffmpeg.load({
-            coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
-            wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
-        });
-        
-        setProcessingState(false);
-    }
-    
-    // --- MAIN LOGIC ---
-    async function handleFileSelect(file) {
-        if (!file) return;
-        resetUI(); // Start with a clean state
-        state.videoFile = file;
-        setProcessingState(true, 'ファイルを準備中...');
-        if (state.videoObjectURL) URL.revokeObjectURL(state.videoObjectURL);
-        state.videoObjectURL = URL.createObjectURL(file);
-        dom.videoPlayer.src = state.videoObjectURL;
-        dom.fileDropZone.classList.add('hidden');
-        dom.videoWrapper.style.display = 'block';
-        try {
-            const audioBuffer = await extractAudioWithFFmpeg(file);
-            state.audioData = audioBuffer.getChannelData(0);
-            state.sampleRate = audioBuffer.sampleRate;
-            triggerAnalysis();
-        } catch (err) {
-            console.error('Error processing audio:', err);
-            alert('音声トラックの処理に失敗しました。');
-            resetUI();
+<script type="module">
+/**
+ * Silence Cutter — main (TypeScript-style JSDoc, transpiled JS for browser)
+ *
+ * 実装ノート:
+ * - 音声データのデコードは AudioContext.decodeAudioData（非同期）で行い、
+ *   Float32Array を WebWorker に transfer して解析（RMS/dB計算、チャンク処理）。
+ * - Worker はチャンクごとの RMS を計算して dB 配列を返す。メインスレッドはヒストグラム描画と無音区間の生成を担当。
+ * - プレビューは precomputed の soundSegments を使って timeupdate でシークすることで無音をスキップ（極力シームレス）。
+ *
+ * 注: 厳密なWASM最適化は今回は未実装。Worker内の処理は TypedArray を使い最小コピーで高速化しています。
+ */
+
+/* ======= ユーティリティ型/関数 ======= */
+/** 秒数を hh:mm:ss.mmm 形式に整形 */
+function fmtTime(s) {
+  if (!isFinite(s)) return "NaN";
+  const ms = Math.floor((s - Math.floor(s)) * 1000);
+  const sec = Math.floor(s % 60);
+  const min = Math.floor((s / 60) % 60);
+  const hr = Math.floor(s / 3600);
+  return `${hr}:${String(min).padStart(2,"0")}:${String(sec).padStart(2,"0")}.${String(ms).padStart(3,"0")}`;
+}
+
+/** log 出力 */
+const logEl = document.getElementById("log");
+function log(...args) {
+  const t = new Date().toLocaleTimeString();
+  logEl.textContent += `[${t}] ${args.join(" ")}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+/* ======= DOM 要素 ======= */
+const dropzone = document.getElementById("dropzone");
+const fileInput = document.getElementById("fileInput");
+const pickBtn = document.getElementById("pickBtn");
+const analyzeBtn = document.getElementById("analyzeBtn");
+const clearBtn = document.getElementById("clearBtn");
+const analyzeSpinner = document.getElementById("analyzeSpinner");
+const statusText = document.getElementById("statusText");
+const progressBar = document.getElementById("progressBar");
+const histogram = document.getElementById("histogram");
+const thresholdEl = document.getElementById("threshold");
+const thVal = document.getElementById("thVal");
+const chunkEl = document.getElementById("chunk");
+const chunkVal = document.getElementById("chunkVal");
+const minSilenceEl = document.getElementById("minSilence");
+const minSilenceVal = document.getElementById("minSilenceVal");
+const paddingEl = document.getElementById("padding");
+const padVal = document.getElementById("padVal");
+const silenceList = document.getElementById("silenceList");
+const soundList = document.getElementById("soundList");
+const videoEl = document.getElementById("video");
+const filenameEl = document.getElementById("filename");
+const filemetaEl = document.getElementById("filemeta");
+const playPreviewBtn = document.getElementById("playPreview");
+const skipSilenceCheckbox = document.getElementById("skipSilence");
+
+/* ======= 初期 UI 値表示 ======= */
+function updateUIValues() {
+  thVal.textContent = `${thresholdEl.value} dB`;
+  chunkVal.textContent = `${chunkEl.value} ms`;
+  minSilenceVal.textContent = `${minSilenceEl.value} ms`;
+  padVal.textContent = `${paddingEl.value} ms`;
+}
+updateUIValues();
+thresholdEl.addEventListener("input", updateUIValues);
+chunkEl.addEventListener("input", updateUIValues);
+minSilenceEl.addEventListener("input", updateUIValues);
+paddingEl.addEventListener("input", updateUIValues);
+
+/* ======= ドラッグ＆ドロップ / ファイル選択 ======= */
+pickBtn.addEventListener("click", ()=> fileInput.click());
+dropzone.addEventListener("click", ()=> fileInput.click());
+fileInput.addEventListener("change", (e)=> {
+  const f = e.target.files[0];
+  if (f) handleFile(f);
+});
+
+["dragenter","dragover"].forEach(ev=>{
+  dropzone.addEventListener(ev, (e)=>{
+    e.preventDefault(); e.stopPropagation();
+    dropzone.classList.add("dragover");
+  });
+});
+["dragleave","drop"].forEach(ev=>{
+  dropzone.addEventListener(ev, (e)=>{
+    e.preventDefault(); e.stopPropagation();
+    dropzone.classList.remove("dragover");
+  });
+});
+dropzone.addEventListener("drop", (e)=>{
+  const f = e.dataTransfer.files[0];
+  if (f) handleFile(f);
+});
+
+/* ======= 状態変数 ======= */
+let currentFile = null;
+let audioBufferGlobal = null; // decoded AudioBuffer
+let sampleRate = 48000;
+let worker = null;
+let lastRmsDbArray = null;
+let soundSegments = []; // [{start,end}]
+let silenceSegments = []; // [{start,end}]
+let analyzing = false;
+let autoSeekHandler = null;
+
+/* ======= Worker 作成（Blob URL を使う - 単一ファイルに収めるため） ======= */
+function createWorker() {
+  // Worker スクリプト（ES6）を文字列で作成
+  const workerCode = `
+  self.onmessage = function(ev) {
+    const msg = ev.data;
+    if (msg.cmd === 'analyze') {
+      const { channelData, sampleRate, chunkMs } = msg;
+      // channelData: Array of ArrayBuffer (Float32Array.buffer for each channel)
+      const channels = channelData.map(b => new Float32Array(b));
+      const length = channels[0].length;
+      const framesPerChunk = Math.max(1, Math.floor(sampleRate * (chunkMs/1000)));
+      const nChunks = Math.ceil(length / framesPerChunk);
+      const rmsDb = new Float32Array(nChunks);
+      // for efficiency, precompute channel count
+      const chCount = channels.length;
+      for (let cIdx = 0; cIdx < nChunks; cIdx++) {
+        const start = cIdx * framesPerChunk;
+        const end = Math.min(length, start + framesPerChunk);
+        let sumSq = 0.0;
+        let samples = 0;
+        // sum across channels
+        for (let ch = 0; ch < chCount; ch++){
+          const chArr = channels[ch];
+          for (let i = start; i < end; i++){
+            const s = chArr[i];
+            sumSq += s * s;
+            samples++;
+          }
         }
-    }
-
-    async function extractAudioWithFFmpeg(videoFile) {
-        await loadFFmpeg();
-        const { fetchFile } = window.FFmpegUtil;
-        setProcessingState(true, '音声トラックを抽出中...');
-        await ffmpeg.writeFile(videoFile.name, await fetchFile(videoFile));
-        const outputFilename = `audio_${Date.now()}.wav`;
-        await ffmpeg.exec(['-i', videoFile.name, '-vn', '-acodec', 'pcm_f32le', '-ar', '48000', '-ac', '1', outputFilename]);
-        const audioData = await ffmpeg.readFile(outputFilename);
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        const audioBuffer = await audioContext.decodeAudioData(audioData.buffer);
-        await ffmpeg.deleteFile(videoFile.name);
-        await ffmpeg.deleteFile(outputFilename);
-        return audioBuffer;
-    }
-        
-    function triggerAnalysis() {
-        if (!state.audioData) return;
-        setProcessingState(true, '音声トラックを解析中...');
-        const params = {
-            threshold: parseFloat(dom.thresholdSlider.value),
-            chunkSize: parseInt(dom.chunkSizeSlider.value, 10),
-            minSilenceDuration: parseInt(dom.minSilenceSlider.value, 10),
-            padding: parseInt(dom.paddingSlider.value, 10),
-        };
-        worker.postMessage({ type: 'ANALYZE', payload: { audioData: state.audioData, sampleRate: state.sampleRate, params: params } }, [state.audioData.buffer]);
-    }
-    
-    function setProcessingState(isProcessing, text = '') {
-        state.isProcessing = isProcessing;
-        dom.loaderOverlay.classList.toggle('hidden', !isProcessing);
-        dom.progressText.textContent = text;
-        [dom.thresholdSlider, dom.chunkSizeSlider, dom.minSilenceSlider, dom.paddingSlider].forEach(el => el.disabled = isProcessing || !state.videoFile);
-        dom.exportButton.disabled = isProcessing || state.soundZones.length === 0;
-    }
-
-    function resetUI() {
-        dom.fileDropZone.classList.remove('hidden');
-        dom.videoWrapper.style.display = 'none';
-        dom.histogramCanvas.style.display = 'none';
-        dom.fileInput.value = ''; // Reset file input
-        if (state.videoObjectURL) URL.revokeObjectURL(state.videoObjectURL);
-        Object.assign(state, { videoFile: null, videoObjectURL: null, audioData: null, soundZones: [], isProcessing: false });
-        setProcessingState(false);
-    }
-    
-    function drawHistogram(volumes) {
-        dom.histogramCanvas.style.display = 'block';
-        const { width, height } = dom.histogramCanvas;
-        histogramCtx.clearRect(0, 0, width, height);
-        const barWidth = width / volumes.length;
-        const threshold = parseFloat(dom.thresholdSlider.value);
-        const gradient = histogramCtx.createLinearGradient(0, 0, 0, height);
-        gradient.addColorStop(0, 'rgba(10, 132, 255, 0.8)');
-        gradient.addColorStop(1, 'rgba(10, 132, 255, 0.3)');
-        const silentColor = 'rgba(255, 80, 80, 0.5)';
-        for (let i = 0; i < volumes.length; i++) {
-            const db = volumes[i];
-            const normalizedHeight = (db + 100) / 100;
-            const barHeight = Math.max(1, normalizedHeight * height);
-            histogramCtx.fillStyle = db < threshold ? silentColor : gradient;
-            histogramCtx.fillRect(i * barWidth, height - barHeight, barWidth, barHeight);
+        // compute RMS
+        const meanSq = samples > 0 ? (sumSq / samples) : 0;
+        const rms = Math.sqrt(meanSq);
+        // convert to dBFS (reference 1.0)
+        const db = rms > 0 ? (20 * Math.log10(rms)) : -200.0;
+        rmsDb[cIdx] = db;
+        // progress notification every 256 chunks
+        if ((cIdx & 255) === 0) {
+          self.postMessage({ type: 'progress', progress: cIdx / nChunks });
         }
+      }
+      self.postMessage({ type:'done', rmsDb: rmsDb.buffer }, [rmsDb.buffer]);
     }
+  };
+  `;
+  const blob = new Blob([workerCode], {type:'application/javascript'});
+  const url = URL.createObjectURL(blob);
+  return new Worker(url);
+}
 
-    function handleTimeUpdate() {
-        if (state.soundZones.length === 0 || dom.videoPlayer.paused || dom.videoPlayer.seeking) return;
-        const currentTime = dom.videoPlayer.currentTime;
-        const currentZone = state.soundZones[state.currentSoundZoneIndex];
-        if (!currentZone || currentTime < currentZone.start) return;
-        if (currentTime >= currentZone.end) {
-            const nextZoneIndex = state.currentSoundZoneIndex + 1;
-            if (nextZoneIndex < state.soundZones.length) {
-                state.currentSoundZoneIndex = nextZoneIndex;
-                dom.videoPlayer.currentTime = state.soundZones[nextZoneIndex].start;
-                dom.videoPlayer.play();
-            } else {
-                dom.videoPlayer.pause();
-                state.currentSoundZoneIndex = 0;
-            }
-        }
+/* ======= ファイル処理フロー ======= */
+async function handleFile(file) {
+  clearAll();
+  currentFile = file;
+  filenameEl.textContent = file.name;
+  filemetaEl.textContent = `${(file.size/1024/1024).toFixed(2)} MB`;
+  log("ファイル選択:", file.name);
+  // video 要素にオブジェクトURLセット（プレビュー用）
+  const url = URL.createObjectURL(file);
+  videoEl.src = url;
+
+  // decode audio
+  try {
+    statusText.textContent = "デコード中...";
+    analyzing = true;
+    analyzeSpinner.hidden = false;
+    progressBar.style.width = "6%";
+    // read as ArrayBuffer
+    const ab = await file.arrayBuffer();
+    // create AudioContext and decode
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const decoded = await audioCtx.decodeAudioData(ab.slice(0)); // async
+    audioBufferGlobal = decoded;
+    sampleRate = decoded.sampleRate;
+    log("デコード完了. duration:", decoded.duration.toFixed(2), "s, sampleRate:", decoded.sampleRate);
+    statusText.textContent = "解析準備完了";
+    progressBar.style.width = "12%";
+    analyzing = false;
+    analyzeSpinner.hidden = true;
+  } catch (err) {
+    console.error(err);
+    statusText.textContent = "デコード失敗";
+    analyzeSpinner.hidden = true;
+    log("エラー: デコードに失敗しました。対応フォーマットか確認してください。", err.message || err);
+    return;
+  }
+}
+
+/* ======= 解析実行 ======= */
+async function analyze() {
+  if (!audioBufferGlobal) { alert("先に動画を選択してください"); return; }
+  // UI 状態
+  analyzeBtn.disabled = true; clearBtn.disabled = true; analyzeSpinner.hidden = false;
+  statusText.textContent = "解析中...";
+  progressBar.style.width = "20%";
+  log("解析開始");
+
+  // パラメータ
+  const thresholdDb = Number(thresholdEl.value);
+  const chunkMs = Number(chunkEl.value);
+  const minSilenceMs = Number(minSilenceEl.value);
+  const paddingMs = Number(paddingEl.value);
+
+  // prepare channel data (transferable)
+  const chCount = audioBufferGlobal.numberOfChannels || 1;
+  const channelData = [];
+  for (let c=0;c<chCount;c++){
+    // copy to Float32Array to ensure contiguous buffer
+    const arr = audioBufferGlobal.getChannelData(c);
+    // create a copy (Float32Array) to be transferable
+    const copy = new Float32Array(arr.length);
+    copy.set(arr);
+    channelData.push(copy.buffer);
+  }
+
+  // create worker and send data
+  worker && worker.terminate();
+  worker = createWorker();
+  worker.onmessage = function(ev) {
+    const msg = ev.data;
+    if (msg.type === 'progress') {
+      const p = Math.min(0.95, 0.2 + msg.progress*0.75);
+      progressBar.style.width = (p*100)+"%";
+      statusText.textContent = `解析中... ${(p*100).toFixed(0)}%`;
+    } else if (msg.type === 'done') {
+      progressBar.style.width = "100%";
+      statusText.textContent = "解析完了";
+      analyzeSpinner.hidden = true;
+      analyzeBtn.disabled = false; clearBtn.disabled = false;
+      // msg.rmsDb is transferred ArrayBuffer
+      const dbArr = new Float32Array(msg.rmsDb);
+      lastRmsDbArray = dbArr;
+      log("RMS->dB チャンク数:", dbArr.length);
+      // post-process to produce silence/sound segments
+      const {soundSegs, silenceSegs} = generateSegmentsFromDbArray(dbArr, {
+        chunkMs, thresholdDb, minSilenceMs, paddingMs, totalDuration: audioBufferGlobal.duration
+      });
+      soundSegments = soundSegs;
+      silenceSegments = silenceSegs;
+      renderSegments();
+      drawHistogram(dbArr);
+      log("無音セグメント数:", silenceSegs.length, "音声セグメント数:", soundSegs.length);
     }
+  };
 
-    async function exportVideo() {
-        if (!state.videoFile || state.soundZones.length === 0) {
-            alert('書き出すデータがありません。'); return;
-        }
-        setProcessingState(true, "書き出しの準備中...");
-        dom.exportProgress.classList.remove('hidden');
-        dom.exportProgressText.textContent = '準備中...';
-        try {
-            await loadFFmpeg();
-            const { fetchFile } = window.FFmpegUtil;
-            const { name } = state.videoFile;
-            const outputName = `clipped-${name.split('.')[0]}.mp4`;
-            await ffmpeg.writeFile(name, await fetchFile(state.videoFile));
-            const filter_complex = state.soundZones.map((z, i) => `[0:v]trim=start=${z.start}:end=${z.end},setpts=PTS-STARTPTS[v${i}];[0:a]atrim=start=${z.start}:end=${z.end},asetpts=PTS-STARTPTS[a${i}];`).join('');
-            const concat_filter = state.soundZones.map((_, i) => `[v${i}][a${i}]`).join('') + `concat=n=${state.soundZones.length}:v=1:a=1[outv][outa]`;
-            await ffmpeg.exec(['-i', name, '-filter_complex', `${filter_complex}${concat_filter}`, '-map', '[outv]', '-map', '[outa]', outputName]);
-            const data = await ffmpeg.readFile(outputName);
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
-            a.download = outputName;
-            a.click();
-            URL.revokeObjectURL(a.href);
-            await ffmpeg.deleteFile(name);
-            await ffmpeg.deleteFile(outputName);
-        } catch (error) {
-            console.error('書き出しエラー:', error); alert('動画の書き出しに失敗しました。');
-        } finally {
-            setProcessingState(false);
-            dom.exportProgress.classList.add('hidden');
-        }
+  // send heavy data with transfer to worker
+  worker.postMessage({ cmd:'analyze', channelData, sampleRate, chunkMs }, channelData);
+}
+
+/* ======= DB配列 -> セグメント生成ロジック ======= */
+/**
+ * @param {Float32Array} dbArr
+ * @param {Object} opts
+ * @returns {{soundSegs:Array, silenceSegs:Array}}
+ */
+function generateSegmentsFromDbArray(dbArr, opts) {
+  const { chunkMs, thresholdDb, minSilenceMs, paddingMs, totalDuration } = opts;
+  const n = dbArr.length;
+  // bool array: isSilent
+  const isSilent = new Uint8Array(n);
+  for (let i=0;i<n;i++){
+    isSilent[i] = dbArr[i] < thresholdDb ? 1 : 0;
+  }
+  // merge contiguous silent chunks to intervals (in ms)
+  const chunksToMs = (i) => i * chunkMs;
+  const silenceIntervals = [];
+  let i=0;
+  while (i < n) {
+    if (isSilent[i]) {
+      const startChunk = i;
+      while (i<n && isSilent[i]) i++;
+      const endChunk = i-1;
+      const startMs = startChunk * chunkMs;
+      const endMs = (endChunk+1) * chunkMs;
+      const dur = endMs - startMs;
+      if (dur >= minSilenceMs) {
+        // apply padding
+        const s = Math.max(0, (startMs - paddingMs)/1000);
+        const e = Math.min(totalDuration, (endMs + paddingMs)/1000);
+        silenceIntervals.push({start:s, end:e});
+      }
+    } else i++;
+  }
+  // now compute sound intervals as complement
+  const soundIntervals = [];
+  let cur = 0.0;
+  silenceIntervals.sort((a,b)=>a.start-b.start);
+  for (const sil of silenceIntervals) {
+    if (cur < sil.start) {
+      soundIntervals.push({start:cur, end: sil.start});
     }
-    
-    // --- EVENT LISTENERS ---
-    dom.fileDropZone.addEventListener('click', () => dom.fileInput.click());
-    dom.fileInput.addEventListener('change', (e) => handleFileSelect(e.target.files[0]));
-    dom.fileDropZone.addEventListener('dragover', (e) => { e.preventDefault(); dom.fileDropZone.classList.add('dragover'); });
-    dom.fileDropZone.addEventListener('dragleave', () => dom.fileDropZone.classList.remove('dragover'));
-    dom.fileDropZone.addEventListener('drop', (e) => { e.preventDefault(); dom.fileDropZone.classList.remove('dragover'); handleFileSelect(e.dataTransfer.files[0]); });
-    
-    worker.onmessage = (e) => {
-        const { type, payload } = e.data;
-        if (type === 'ANALYSIS_COMPLETE') {
-            state.audioData = new Float32Array(payload.audioDataBuffer);
-            state.soundZones = payload.soundZones;
-            drawHistogram(payload.volumes);
-            setProcessingState(false);
-            if (state.soundZones.length > 0) {
-                dom.videoPlayer.currentTime = state.soundZones[0].start;
-                state.currentSoundZoneIndex = 0;
-                dom.videoPlayer.play();
-            } else {
-                alert('解析の結果、音声区間が見つかりませんでした。');
-            }
-        }
-    };
+    cur = Math.max(cur, sil.end);
+  }
+  if (cur < totalDuration) soundIntervals.push({start:cur, end: totalDuration});
+  return { soundSegs: soundIntervals, silenceSegs: silenceIntervals };
+}
 
-    dom.exportButton.addEventListener('click', exportVideo);
-    
-    const sliders = [
-        { el: dom.thresholdSlider, valueEl: dom.thresholdValue, unit: ' dB' }, { el: dom.chunkSizeSlider, valueEl: dom.chunkSizeValue, unit: ' ms' },
-        { el: dom.minSilenceSlider, valueEl: dom.minSilenceValue, unit: ' ms' }, { el: dom.paddingSlider, valueEl: dom.paddingValue, unit: ' ms' },
-    ];
-    sliders.forEach(({el, valueEl, unit}) => {
-        el.addEventListener('input', () => { valueEl.textContent = `${el.value}${unit}`; });
-        el.addEventListener('change', triggerAnalysis);
-    });
-    
-    dom.videoPlayer.addEventListener('timeupdate', handleTimeUpdate);
-    dom.videoPlayer.addEventListener('seeking', () => {
-        const currentTime = dom.videoPlayer.currentTime;
-        const zoneIndex = state.soundZones.findIndex(z => currentTime >= z.start && currentTime <= z.end);
-        state.currentSoundZoneIndex = (zoneIndex !== -1) ? zoneIndex : 0;
-    });
-    </script>
+/* ======= ヒストグラム描画 ======= */
+function drawHistogram(dbArr) {
+  const canvas = histogram;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = canvas.clientWidth * dpr;
+  canvas.height = canvas.clientHeight * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  // bucketize
+  const buckets = 60;
+  const minDb = -100, maxDb = 0;
+  const counts = new Uint32Array(buckets);
+  for (let i=0;i<dbArr.length;i++){
+    const v = Math.max(minDb, Math.min(maxDb, dbArr[i]));
+    const idx = Math.floor(((v - minDb) / (maxDb - minDb)) * (buckets-1));
+    counts[idx]++;
+  }
+  const maxC = Math.max(1, Math.max(...counts));
+  // draw bars
+  const w = canvas.width, h = canvas.height;
+  const barW = w / buckets;
+  for (let b=0;b<buckets;b++){
+    const c = counts[b];
+    const hh = (c / maxC) * (h*0.9);
+    ctx.fillStyle = "rgba(255,255,255,0.08)";
+    ctx.fillRect(b*barW, h-hh, Math.max(1,barW-1), hh);
+  }
+  // axis labels
+  ctx.fillStyle = "rgba(255,255,255,0.12)";
+  ctx.font = `${12*dpr}px system-ui`;
+  ctx.fillText(`${Math.round(-100)} dB`, 4*dpr, 14*dpr);
+  ctx.fillText(`${Math.round(0)} dB`, w - 28*dpr, 14*dpr);
+}
+
+/* ======= セグメント表示 ======= */
+function renderSegments() {
+  if (silenceSegments.length===0) {
+    silenceList.textContent = "検出なし";
+  } else {
+    silenceList.innerHTML = silenceSegments.map(s=>`${fmtTime(s.start)} → ${fmtTime(s.end)}`).join("\n");
+  }
+  if (soundSegments.length===0) {
+    soundList.textContent = "検出なし";
+  } else {
+    soundList.innerHTML = soundSegments.map((s,i)=>`[${String(i).padStart(2,"0")}] ${fmtTime(s.start)} → ${fmtTime(s.end)}`).join("\n");
+  }
+}
+
+/* ======= プレビュー（無音スキップ） ======= */
+playPreviewBtn.addEventListener("click", ()=>{
+  if (!videoEl.src) { alert("先に動画を選択してください"); return; }
+  if (skipSilenceCheckbox.checked && soundSegments.length===0) {
+    alert("解析結果がありません。先に解析を実行してください（左側の解析ボタン）。");
+    return;
+  }
+  // toggle play/pause
+  if (videoEl.paused) {
+    // start from first sound segment or from current time
+    startPreview();
+  } else {
+    stopPreview();
+  }
+});
+
+function startPreview(){
+  playPreviewBtn.textContent = "停止";
+  videoEl.play();
+  if (skipSilenceCheckbox.checked) {
+    setupAutoSkip();
+  } else {
+    removeAutoSkip();
+  }
+}
+
+function stopPreview(){
+  playPreviewBtn.textContent = "プレビュー再生";
+  videoEl.pause();
+  removeAutoSkip();
+}
+
+function setupAutoSkip() {
+  removeAutoSkip();
+  let idx = findSegmentIndexAtTime(videoEl.currentTime);
+  if (idx < 0) idx = 0;
+  // if current time is inside silence, jump to next sound
+  if (idx >= soundSegments.length) { videoEl.currentTime = soundSegments.length?soundSegments[soundSegments.length-1].start:0; return; }
+  // ensure we start inside a sound segment
+  if (videoEl.currentTime < soundSegments[idx].start) videoEl.currentTime = soundSegments[idx].start + 0.001;
+  autoSeekHandler = function () {
+    const t = videoEl.currentTime;
+    const seg = soundSegments[idx];
+    if (!seg) return;
+    // if beyond this segment, advance
+    if (t >= seg.end - 0.05) {
+      idx++;
+      if (idx >= soundSegments.length) {
+        // end
+        stopPreview();
+      } else {
+        videoEl.currentTime = Math.max(soundSegments[idx].start + 0.001, soundSegments[idx].start);
+      }
+    }
+  };
+  videoEl.addEventListener("timeupdate", autoSeekHandler);
+}
+
+function removeAutoSkip(){
+  if (autoSeekHandler) {
+    videoEl.removeEventListener("timeupdate", autoSeekHandler);
+    autoSeekHandler = null;
+  }
+}
+
+/** 現在時刻が入っている sound segment の index を返す（ない場合は -1） */
+function findSegmentIndexAtTime(t) {
+  for (let i=0;i<soundSegments.length;i++){
+    const s = soundSegments[i];
+    if (t >= s.start && t < s.end) return i;
+    if (t < s.start) return i; // next segment index
+  }
+  return soundSegments.length;
+}
+
+/* ======= クリア ======= */
+function clearAll(){
+  currentFile = null; audioBufferGlobal = null; lastRmsDbArray = null;
+  soundSegments = []; silenceSegments = [];
+  filenameEl.textContent = "ファイル未選択";
+  filemetaEl.textContent = "";
+  silenceList.textContent = "—";
+  soundList.textContent = "—";
+  videoEl.removeAttribute("src"); videoEl.load();
+  progressBar.style.width = "0%";
+  statusText.textContent = "待機中";
+  log("クリアしました");
+}
+
+/* ======= UI イベントバインディング ======= */
+analyzeBtn.addEventListener("click", ()=> {
+  analyze().catch(err=>{ console.error(err); analyzeSpinner.hidden=true; analyzeBtn.disabled=false; statusText.textContent='エラー'; log('解析中にエラー', err.message||err); });
+});
+clearBtn.addEventListener("click", ()=> clearAll());
+
+/* 終了時クリーンアップ */
+window.addEventListener("unload", ()=> {
+  worker && worker.terminate();
+});
+
+/* 初期ログ */
+log("Ready. ファイルをドロップするか「ファイルを選択」を押してください。");
+</script>
 </body>
 </html>
