@@ -1,58 +1,14 @@
 <!DOCTYPE html>
 <html lang="ja">
-    // 【変更後】の loadFFmpeg 関数
-async function loadFFmpeg() {
-    if (ffmpeg && ffmpeg.loaded) return;
-    
-    // この関数を呼び出す側でUIテキストを設定するので、ここでは汎用的なテキストにするか、削除
-    const originalText = dom.progressText.textContent; // 元のテキストを保持
-    setProcessingState(true, '書き出しエンジンをロード中...');
-    
-    ffmpeg = new FFmpeg.FFmpeg();
-    ffmpeg.on('log', ({ message }) => {
-        console.log(message);
-    });
-    ffmpeg.on('progress', ({ progress }) => {
-        // 汎用的な進捗表示
-        if (progress > 0 && progress < 1) {
-            const percent = Math.round(progress * 100);
-            dom.exportProgressBar.value = percent;
-            // テキストは更新しない、または汎用的なものにする
-        }
-    });
-    
-    const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm"; // バージョンを更新
-    await ffmpeg.load({
-        coreURL: await FFmpegUtil.toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
-        wasmURL: await FFmpegUtil.toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
-    });
-
-    console.log('FFmpeg loaded.');
-    // ロードが終わったら、UIを元の状態に戻すか、呼び出し元に制御を返す
-    setProcessingState(false);
-    dom.progressText.textContent = originalText;
-}
-
-// 変更点の反映のため、unpkgのURLも最新の推奨バージョンに更新しました。
-// @ffmpeg/ffmpeg@0.11.6 → @ffmpeg/ffmpeg@0.12.10
-// @ffmpeg/util@0.11.0 → @ffmpeg/util@0.12.1
-// @ffmpeg/core@0.11.0 → @ffmpeg/core@0.12.6
-// head内のscriptタグも対応するバージョンに更新してください。
-/*
-<head>
-...
-    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/ffmpeg.min.js" defer></script>
-    <script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/util.min.js" defer></script>
-...
-</head>
-*/
-    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
-<script src="https://unpkg.com/@ffmpeg/util@0.11.0/dist/util.min.js"></script>
-</head>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Silent Clipper | AI-Powered Video Silence Remover</title>
+
+    <!-- FFmpeg.wasm Scripts (Updated Versions) -->
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/ffmpeg.min.js"></script>
+    <script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/util.min.js"></script>
+
     <style>
         :root {
             --bg-color: #121212;
@@ -215,7 +171,6 @@ async function loadFFmpeg() {
             to { transform: rotate(360deg); }
         }
 
-
         /* Controls Panel */
         .controls-panel h3 {
             font-size: 1.1rem;
@@ -264,6 +219,27 @@ async function loadFFmpeg() {
             border: none;
         }
         
+        /* Export Button */
+        #exportButton {
+            width: 100%;
+            padding: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            color: #fff;
+            background-color: var(--primary-color);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color var(--transition-speed);
+        }
+        #exportButton:hover {
+            background-color: #0077ED;
+        }
+        #exportButton:disabled {
+            background-color: var(--border-color);
+            cursor: not-allowed;
+        }
+        
         /* Utility */
         .hidden { display: none !important; }
 
@@ -284,7 +260,6 @@ async function loadFFmpeg() {
                 max-height: 40vh;
             }
         }
-
     </style>
 </head>
 <body>
@@ -296,7 +271,7 @@ async function loadFFmpeg() {
         <main>
             <div class="video-panel">
                 <div class="file-drop-zone" id="fileDropZone">
-                    <input type="file" id="fileInput" accept="video/mp4,video/webm,video/quicktime">
+                    <input type="file" id="fileInput" accept="video/mp4,video/webm,video/quicktime,video/*">
                     <h2>ビデオファイルをドラッグ＆ドロップ</h2>
                     <p>またはクリックしてファイルを選択</p>
                 </div>
@@ -312,14 +287,14 @@ async function loadFFmpeg() {
                 <canvas id="histogramCanvas"></canvas>
             </div>
             <aside class="controls-panel" id="controlsPanel">
-                <h3>設定</h3>
                 <div class="export-section" style="margin-bottom: 1.5rem;">
-    <button id="exportButton" style="...">書き出し</button>
-    <div id="exportProgress" class="hidden" style="margin-top: 0.75rem;">
-        <p id="exportProgressText" style="font-size: 0.9rem; margin-bottom: 0.5rem;"></p>
-        <progress id="exportProgressBar" value="0" max="100" style="width: 100%;"></progress>
-    </div>
-</div>
+                    <button id="exportButton">書き出し</button>
+                    <div id="exportProgress" class="hidden" style="margin-top: 0.75rem;">
+                        <p id="exportProgressText" style="font-size: 0.9rem; margin-bottom: 0.5rem;"></p>
+                        <progress id="exportProgressBar" value="0" max="100" style="width: 100%;"></progress>
+                    </div>
+                </div>
+                <h3>設定</h3>
                 <div class="control-group">
                     <label for="thresholdSlider">無音しきい値 <span class="value" id="thresholdValue">-40 dB</span></label>
                     <input type="range" min="-60" max="-20" value="-40" class="slider" id="thresholdSlider">
@@ -346,22 +321,9 @@ async function loadFFmpeg() {
     // ===================================================================================
 
     /**
-     * @typedef {object} AudioChunk
-     * @property {number} volume - The volume of the chunk in dBFS.
-     */
-
-    /**
      * @typedef {object} TimeRange
      * @property {number} start - Start time in seconds.
      * @property {number} end - End time in seconds.
-     */
-
-    /**
-     * @typedef {object} AnalysisParams
-     * @property {number} threshold
-     * @property {number} chunkSize
-     * @property {number} minSilenceDuration
-     * @property {number} padding
      */
     
     // ===================================================================================
@@ -369,19 +331,12 @@ async function loadFFmpeg() {
     // ===================================================================================
     
     const state = {
-        /** @type {File | null} */
         videoFile: null,
-        /** @type {string | null} */
         videoObjectURL: null,
-        /** @type {Float32Array | null} */
         audioData: null,
-        /** @type {number} */
         sampleRate: 0,
-        /** @type {TimeRange[]} */
         soundZones: [],
-        /** @type {boolean} */
         isProcessing: false,
-        /** @type {number} */
         currentSoundZoneIndex: 0,
     };
 
@@ -398,21 +353,18 @@ async function loadFFmpeg() {
         progressText: document.getElementById('progressText'),
         histogramCanvas: document.getElementById('histogramCanvas'),
         controlsPanel: document.getElementById('controlsPanel'),
-        // Sliders
         thresholdSlider: document.getElementById('thresholdSlider'),
         chunkSizeSlider: document.getElementById('chunkSizeSlider'),
         minSilenceSlider: document.getElementById('minSilenceSlider'),
         paddingSlider: document.getElementById('paddingSlider'),
-        // Slider value displays
         thresholdValue: document.getElementById('thresholdValue'),
         chunkSizeValue: document.getElementById('chunkSizeValue'),
         minSilenceValue: document.getElementById('minSilenceValue'),
         paddingValue: document.getElementById('paddingValue'),
-
         exportButton: document.getElementById('exportButton'),
-    exportProgress: document.getElementById('exportProgress'),
-    exportProgressText: document.getElementById('exportProgressText'),
-    exportProgressBar: document.getElementById('exportProgressBar'),
+        exportProgress: document.getElementById('exportProgress'),
+        exportProgressText: document.getElementById('exportProgressText'),
+        exportProgressBar: document.getElementById('exportProgressBar'),
     };
     
     const histogramCtx = dom.histogramCanvas.getContext('2d');
@@ -421,22 +373,10 @@ async function loadFFmpeg() {
     // --- WEB WORKER INITIALIZATION ---
     // ===================================================================================
 
-    // NOTE: This is the modern way to embed worker code in a single file without
-    // creating a separate .js file. It's clean and efficient.
     const workerCode = `
-        // --- WASM LOADER (inside worker) ---
-        // In a real project, the .wasm file would be fetched. For single-file deployment,
-        // it could be base64 encoded and embedded as a string constant.
         let wasm;
         async function loadWasm() {
-            // This is a placeholder for loading your compiled Rust/C++ WASM module.
-            // const wasmCode = await fetch('audio_processor.wasm');
-            // const wasmModule = await WebAssembly.instantiateStreaming(wasmCode);
-            // wasm = wasmModule.instance.exports;
-            
-            // For now, we'll simulate the WASM with a JS function.
             wasm = {
-                // This function simulates the high-performance RMS calculation from WASM.
                 calculate_rms_dbfs_for_chunks: (audioData, sampleRate, chunkSizeMs) => {
                     const chunkSamples = Math.floor(sampleRate * (chunkSizeMs / 1000));
                     const numChunks = Math.floor(audioData.length / chunkSamples);
@@ -449,12 +389,11 @@ async function loadFFmpeg() {
                             sumOfSquares += audioData[j] * audioData[j];
                         }
                         const rms = Math.sqrt(sumOfSquares / chunkSamples);
-                        volumes[i] = 20 * Math.log10(rms);
+                        volumes[i] = (rms > 0) ? 20 * Math.log10(rms) : -144; // Avoid -Infinity
                     }
                     return volumes;
                 }
             };
-            console.log("WASM module (simulated) loaded in worker.");
         }
         
         self.onmessage = async (e) => {
@@ -462,33 +401,18 @@ async function loadFFmpeg() {
             if (type === 'ANALYZE') {
                 if (!wasm) await loadWasm();
                 
-                self.postMessage({ type: 'PROGRESS', payload: { text: '音声データをデコード中...' } });
-
-                // 1. Decode Audio Data
-                // OfflineAudioContext is the fastest way to decode audio in the background.
-                const audioCtx = new OfflineAudioContext(1, payload.audioData.length, payload.sampleRate);
-                const source = audioCtx.createBufferSource();
-                source.buffer = audioCtx.createBuffer(1, payload.audioData.length, payload.sampleRate);
-                source.buffer.copyToChannel(payload.audioData, 0);
+                self.postMessage({ type: 'PROGRESS', payload: { text: '音量を解析中...' } });
                 
-                const decodedBuffer = await audioCtx.startRendering();
-                const decodedAudioData = decodedBuffer.getChannelData(0);
-
-                self.postMessage({ type: 'PROGRESS', payload: { text: '音量を解析中 (WASM)...' } });
-                
-                // 2. Perform high-speed analysis via WASM
                 const volumes = wasm.calculate_rms_dbfs_for_chunks(
-                    decodedAudioData,
+                    payload.audioData,
                     payload.sampleRate,
                     payload.params.chunkSize
                 );
 
-                // Send histogram data back to the main thread
-                self.postMessage({ type: 'HISTOGRAM_DATA', payload: volumes });
+                self.postMessage({ type: 'HISTOGRAM_DATA', payload: { volumes, audioDataBuffer: payload.audioData.buffer } }, [payload.audioData.buffer]);
 
                 self.postMessage({ type: 'PROGRESS', payload: { text: '無音区間を検出中...' } });
 
-                // 3. Identify silent chunks
                 const isSilent = new Uint8Array(volumes.length);
                 for (let i = 0; i < volumes.length; i++) {
                     if (volumes[i] < payload.params.threshold) {
@@ -496,57 +420,59 @@ async function loadFFmpeg() {
                     }
                 }
                 
-                // 4. Merge silent chunks and create sound zones
                 const minSilenceChunks = Math.ceil(payload.params.minSilenceDuration / payload.params.chunkSize);
                 const paddingSeconds = payload.params.padding / 1000;
                 const chunkSizeSeconds = payload.params.chunkSize / 1000;
 
                 const soundZones = [];
-                let lastSoundEnd = 0;
-                let silentChunkCount = 0;
-
-                for (let i = 0; i < isSilent.length; i++) {
-                    if (isSilent[i]) {
-                        silentChunkCount++;
-                    } else {
-                        if (silentChunkCount >= minSilenceChunks) {
-                            const silenceStart = (i - silentChunkCount) * chunkSizeSeconds;
-                            if (lastSoundEnd < silenceStart) {
+                let startOfSound = 0;
+                
+                for(let i = 0; i < isSilent.length; i++){
+                    if(isSilent[i] === 1){
+                        let silenceEnd = i;
+                        while(silenceEnd < isSilent.length && isSilent[silenceEnd] === 1){
+                            silenceEnd++;
+                        }
+                        const silenceDuration = (silenceEnd - i) * chunkSizeSeconds * 1000;
+                        if(silenceDuration >= payload.params.minSilenceDuration){
+                            const endOfSound = i * chunkSizeSeconds;
+                            if(endOfSound > startOfSound){
                                 soundZones.push({
-                                    start: Math.max(0, lastSoundEnd - paddingSeconds),
-                                    end: Math.min(silenceStart + paddingSeconds, (i * chunkSizeSeconds))
+                                    start: startOfSound - paddingSeconds,
+                                    end: endOfSound + paddingSeconds
                                 });
                             }
+                            startOfSound = silenceEnd * chunkSizeSeconds;
                         }
-                        lastSoundEnd = (i + 1) * chunkSizeSeconds;
-                        silentChunkCount = 0;
+                        i = silenceEnd - 1;
                     }
                 }
-                
-                // Add the final sound zone if any
-                if (lastSoundEnd < (volumes.length * chunkSizeSeconds)) {
-                     soundZones.push({
-                         start: Math.max(0, lastSoundEnd - paddingSeconds),
-                         end: (volumes.length * chunkSizeSeconds)
-                     });
+
+                if (startOfSound < volumes.length * chunkSizeSeconds) {
+                    soundZones.push({
+                        start: startOfSound - paddingSeconds,
+                        end: volumes.length * chunkSizeSeconds
+                    });
                 }
                 
-                // Merge overlapping zones
-                if (soundZones.length > 0) {
-                    const mergedZones = [soundZones[0]];
-                    for(let i = 1; i < soundZones.length; i++) {
-                        const lastZone = mergedZones[mergedZones.length - 1];
-                        const currentZone = soundZones[i];
-                        if (currentZone.start <= lastZone.end) {
-                            lastZone.end = Math.max(lastZone.end, currentZone.end);
-                        } else {
-                            mergedZones.push(currentZone);
-                        }
+                const mergedZones = soundZones.reduce((acc, current) => {
+                    if (acc.length === 0) {
+                        acc.push(current);
+                        return acc;
                     }
-                    self.postMessage({ type: 'ANALYSIS_COMPLETE', payload: { soundZones: mergedZones } });
-                } else {
-                     self.postMessage({ type: 'ANALYSIS_COMPLETE', payload: { soundZones: [] } });
-                }
+                    const last = acc[acc.length - 1];
+                    if (current.start <= last.end) {
+                        last.end = Math.max(last.end, current.end);
+                    } else {
+                        acc.push(current);
+                    }
+                    return acc;
+                }, []).map(zone => ({
+                    start: Math.max(0, zone.start),
+                    end: zone.end
+                }));
+                
+                self.postMessage({ type: 'ANALYSIS_COMPLETE', payload: { soundZones: mergedZones } });
             }
         };
     `;
@@ -554,90 +480,95 @@ async function loadFFmpeg() {
     const worker = new Worker(URL.createObjectURL(workerBlob));
 
     // ===================================================================================
-    // --- MAIN THREAD LOGIC ---
+    // --- FFmpeg Logic ---
     // ===================================================================================
-
-    /**
-     * Handles file selection (drag-drop or click)
-     * @param {File} file The selected video file.
-     */
-    // 【変更後】の handleFileSelect 関数
-async function handleFileSelect(file) {
-    if (!file || !file.type.startsWith('video/')) {
-        alert('有効なビデオファイルを選択してください。');
-        return;
-    }
     
-    state.videoFile = file;
-    setProcessingState(true, 'ファイルを読み込み中...');
+    let ffmpeg;
 
-    if (state.videoObjectURL) {
-        URL.revokeObjectURL(state.videoObjectURL);
-    }
-    state.videoObjectURL = URL.createObjectURL(file);
-    dom.videoPlayer.src = state.videoObjectURL;
+    async function loadFFmpeg() {
+        if (ffmpeg && ffmpeg.loaded) return;
+        
+        const { FFmpeg } = window.FFmpeg;
+        const { toBlobURL } = window.FFmpegUtil;
 
-    dom.fileDropZone.classList.add('hidden');
-    dom.videoWrapper.style.display = 'block';
-    
-    try {
-        // FFmpegを使って音声トラックを抽出・デコードする
-        const audioBuffer = await extractAudioWithFFmpeg(file);
-        
-        state.audioData = audioBuffer.getChannelData(0); // チャンネルは最初のもの(モノラル)を使用
-        state.sampleRate = audioBuffer.sampleRate;
-        
-        // 音声データが取得できたので、解析をトリガー
-        triggerAnalysis();
-    } catch (err) {
-        console.error('Error processing audio with FFmpeg:', err);
-        alert('音声トラックの処理に失敗しました。ファイルが破損しているか、サポートされていない形式の可能性があります。');
+        ffmpeg = new FFmpeg();
+        ffmpeg.on('log', ({ message }) => console.log(message));
+        ffmpeg.on('progress', ({ progress }) => {
+            if (progress > 0 && progress <= 1) {
+                const percent = Math.round(progress * 100);
+                dom.exportProgressBar.value = percent;
+                if (state.isProcessing) { // Only update text if it's a user-facing process
+                    dom.exportProgressText.textContent = `処理中... ${percent}%`;
+                }
+            }
+        });
+
+        setProcessingState(true, 'コアエンジンをロード中...');
+        const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
+        await ffmpeg.load({
+            coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
+            wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
+        });
         setProcessingState(false);
     }
-}
-    // 【新規追加】FFmpegで音声を抽出する関数
-/**
- * Uses FFmpeg.wasm to extract audio from a video file and decode it into an AudioBuffer.
- * This handles codecs not supported by the browser's native decodeAudioData.
- * @param {File} videoFile The video file.
- * @returns {Promise<AudioBuffer>} The decoded audio data.
- */
-async function extractAudioWithFFmpeg(videoFile) {
-    await loadFFmpeg(); // FFmpegがロードされていることを確認
 
-    setProcessingState(true, '音声トラックを抽出中...');
-    dom.exportProgressBar.value = 0; // 進捗バーをリセット
+    // ===================================================================================
+    // --- MAIN APPLICATION LOGIC ---
+    // ===================================================================================
 
-    await ffmpeg.writeFile(videoFile.name, await FFmpegUtil.fetchFile(videoFile));
-
-    // FFmpegコマンド
-    // -i: 入力ファイル
-    // -vn: ビデオを無視
-    // -acodec pcm_f32le: 音声コーデックを32bit float PCMに変換 (Web Audio APIの内部形式)
-    // -ar 48000: サンプルレートを48kHzに標準化
-    const outputFilename = 'audio_for_analysis.wav';
-    await ffmpeg.exec('-i', videoFile.name, '-vn', '-acodec', 'pcm_f32le', '-ar', '48000', outputFilename);
-
-    setProcessingState(true, '音声データをデコード中...');
-    const audioData = await ffmpeg.readFile(outputFilename);
-
-    // FFmpegが出力したWAVデータを、Web Audio APIが使えるAudioBuffer形式に変換
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    const audioBuffer = await audioContext.decodeAudioData(audioData.buffer);
-    
-    // 不要になった仮想ファイルを削除してメモリを解放
-    await ffmpeg.deleteFile(videoFile.name);
-    await ffmpeg.deleteFile(outputFilename);
-    
-    return audioBuffer;
-}
+    async function handleFileSelect(file) {
+        if (!file) return;
         
-    /**
-     * Triggers the analysis in the Web Worker
-     */
+        state.videoFile = file;
+        setProcessingState(true, 'ファイルを準備中...');
+
+        if (state.videoObjectURL) URL.revokeObjectURL(state.videoObjectURL);
+        state.videoObjectURL = URL.createObjectURL(file);
+        dom.videoPlayer.src = state.videoObjectURL;
+
+        dom.fileDropZone.classList.add('hidden');
+        dom.videoWrapper.style.display = 'block';
+        
+        try {
+            const audioBuffer = await extractAudioWithFFmpeg(file);
+            state.audioData = audioBuffer.getChannelData(0);
+            state.sampleRate = audioBuffer.sampleRate;
+            triggerAnalysis();
+        } catch (err) {
+            console.error('Error processing audio:', err);
+            alert('音声トラックの処理に失敗しました。ファイルが破損しているか、サポートされていない形式の可能性があります。');
+            setProcessingState(false);
+        }
+    }
+
+    async function extractAudioWithFFmpeg(videoFile) {
+        await loadFFmpeg();
+        const { fetchFile } = window.FFmpegUtil;
+
+        setProcessingState(true, '音声トラックを抽出中...');
+        dom.exportProgress.classList.remove('hidden');
+        dom.exportProgressBar.value = 0;
+
+        await ffmpeg.writeFile(videoFile.name, await fetchFile(videoFile));
+
+        const outputFilename = `audio_${Date.now()}.wav`;
+        await ffmpeg.exec(['-i', videoFile.name, '-vn', '-acodec', 'pcm_f32le', '-ar', '48000', '-ac', '1', outputFilename]);
+
+        setProcessingState(true, '音声データをデコード中...');
+        const audioData = await ffmpeg.readFile(outputFilename);
+        
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const audioBuffer = await audioContext.decodeAudioData(audioData.buffer);
+        
+        await ffmpeg.deleteFile(videoFile.name);
+        await ffmpeg.deleteFile(outputFilename);
+        
+        dom.exportProgress.classList.add('hidden');
+        return audioBuffer;
+    }
+        
     function triggerAnalysis() {
-        if (!state.audioData || state.isProcessing) return;
-        
+        if (!state.audioData) return;
         setProcessingState(true, '解析の準備中...');
         
         const params = {
@@ -647,7 +578,6 @@ async function extractAudioWithFFmpeg(videoFile) {
             padding: parseInt(dom.paddingSlider.value, 10),
         };
 
-        // Transfer AudioData to worker to avoid copying large amounts of data
         worker.postMessage({
             type: 'ANALYZE',
             payload: {
@@ -658,59 +588,38 @@ async function extractAudioWithFFmpeg(videoFile) {
         }, [state.audioData.buffer]);
     }
     
-    /**
-     * Updates the UI to reflect processing state
-     * @param {boolean} isProcessing
-     * @param {string} [text='']
-     */
     function setProcessingState(isProcessing, text = '') {
         state.isProcessing = isProcessing;
         dom.loaderOverlay.classList.toggle('hidden', !isProcessing);
         dom.progressText.textContent = text;
-        
-        // Disable sliders during processing
-        [dom.thresholdSlider, dom.chunkSizeSlider, dom.minSilenceSlider, dom.paddingSlider]
-            .forEach(slider => slider.disabled = isProcessing);
+        [dom.thresholdSlider, dom.chunkSizeSlider, dom.minSilenceSlider, dom.paddingSlider, dom.exportButton]
+            .forEach(el => el.disabled = isProcessing);
     }
     
-    /**
-     * Draws the volume histogram on the canvas
-     * @param {Float32Array} volumes 
-     */
     function drawHistogram(volumes) {
         const { width, height } = dom.histogramCanvas;
         histogramCtx.clearRect(0, 0, width, height);
-
         const barWidth = width / volumes.length;
         const threshold = parseFloat(dom.thresholdSlider.value);
         
-        // Define a gradient for the bars
         const gradient = histogramCtx.createLinearGradient(0, 0, 0, height);
-        gradient.addColorStop(0, 'rgba(10, 132, 255, 0.8)'); // Primary color
+        gradient.addColorStop(0, 'rgba(10, 132, 255, 0.8)');
         gradient.addColorStop(1, 'rgba(10, 132, 255, 0.3)');
-        
-        const silentColor = 'rgba(255, 80, 80, 0.5)'; // A color for silent parts
+        const silentColor = 'rgba(255, 80, 80, 0.5)';
         
         for (let i = 0; i < volumes.length; i++) {
             const db = volumes[i];
-            // Normalize dB to a 0-1 range. Assume a range of -80dB to 0dB.
-            const normalizedHeight = (db + 80) / 80;
+            const normalizedHeight = (db + 100) / 100; // Assume range -100dB to 0dB
             const barHeight = Math.max(1, normalizedHeight * height);
-
             histogramCtx.fillStyle = db < threshold ? silentColor : gradient;
             histogramCtx.fillRect(i * barWidth, height - barHeight, barWidth, barHeight);
         }
     }
 
-    /**
-     * Handles the preview playback logic
-     */
     function handleTimeUpdate() {
         if (state.soundZones.length === 0 || dom.videoPlayer.paused) return;
-
         const currentTime = dom.videoPlayer.currentTime;
         const currentZone = state.soundZones[state.currentSoundZoneIndex];
-
         if (currentTime >= currentZone.end) {
             const nextZoneIndex = state.currentSoundZoneIndex + 1;
             if (nextZoneIndex < state.soundZones.length) {
@@ -719,118 +628,65 @@ async function extractAudioWithFFmpeg(videoFile) {
                 dom.videoPlayer.play();
             } else {
                 dom.videoPlayer.pause();
-                dom.videoPlayer.currentTime = state.soundZones[0].start; // Loop back
+                dom.videoPlayer.currentTime = state.soundZones[0].start;
                 state.currentSoundZoneIndex = 0;
             }
         }
     }
 
-        // ===================================================================================
-// --- EXPORT LOGIC (FFmpeg.wasm) ---
-// ===================================================================================
+    async function exportVideo() {
+        if (!state.videoFile || state.soundZones.length === 0) {
+            alert('書き出すデータがありません。先にファイルを解析してください。');
+            return;
+        }
 
-let ffmpeg; // FFmpegインスタンスを保持する変数
+        setProcessingState(true, "書き出しの準備中...");
+        dom.exportProgress.classList.remove('hidden');
 
-async function loadFFmpeg() {
-    if (ffmpeg && ffmpeg.loaded) return;
-    
-    dom.exportProgress.classList.remove('hidden');
-    dom.exportProgressText.textContent = '書き出しエンジンをロード中...';
-    
-    ffmpeg = new FFmpeg.FFmpeg();
-    ffmpeg.on('log', ({ message }) => {
-        // FFmpegのログをコンソールに出力（デバッグに便利）
-        console.log(message);
-    });
-    ffmpeg.on('progress', ({ progress, time }) => {
-        const progressPercent = Math.round(progress * 100);
-        dom.exportProgressBar.value = progressPercent;
-        dom.exportProgressText.textContent = `処理中... ${progressPercent}%`;
-    });
-    
-    const baseURL = "https://unpkg.com/@ffmpeg/core@0.11.0/dist/";
-    await ffmpeg.load({
-        coreURL: await FFmpegUtil.toBlobURL(`${baseURL}ffmpeg-core.js`, "text/javascript"),
-        wasmURL: await FFmpegUtil.toBlobURL(`${baseURL}ffmpeg-core.wasm`, "application/wasm"),
-    });
-    
-    console.log('FFmpeg loaded.');
-}
+        try {
+            await loadFFmpeg();
+            const { fetchFile } = window.FFmpegUtil;
+            const { name } = state.videoFile;
+            const outputName = `clipped-${name.split('.')[0]}.mp4`;
 
-async function exportVideo() {
-    if (!state.videoFile || state.soundZones.length === 0) {
-        alert('書き出すデータがありません。先にファイルを解析してください。');
-        return;
+            await ffmpeg.writeFile(name, await fetchFile(state.videoFile));
+            
+            const filter_complex = state.soundZones
+                .map((zone, i) => `[0:v]trim=start=${zone.start}:end=${zone.end},setpts=PTS-STARTPTS[v${i}];[0:a]atrim=start=${zone.start}:end=${zone.end},asetpts=PTS-STARTPTS[a${i}];`)
+                .join('');
+            const concat_filter = state.soundZones
+                .map((_, i) => `[v${i}][a${i}]`)
+                .join('') + `concat=n=${state.soundZones.length}:v=1:a=1[outv][outa]`;
+            
+            await ffmpeg.exec(['-i', name, '-filter_complex', `${filter_complex}${concat_filter}`, '-map', '[outv]', '-map', '[outa]', outputName]);
+            
+            const data = await ffmpeg.readFile(outputName);
+            const blob = new Blob([data.buffer], { type: 'video/mp4' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = outputName;
+            a.click();
+            URL.revokeObjectURL(url);
+
+            await ffmpeg.deleteFile(name);
+            await ffmpeg.deleteFile(outputName);
+        } catch (error) {
+            console.error('書き出し中にエラーが発生しました:', error);
+            alert('動画の書き出しに失敗しました。');
+        } finally {
+            setProcessingState(false);
+            dom.exportProgress.classList.add('hidden');
+        }
     }
-
-    dom.exportButton.disabled = true;
-    
-    try {
-        await loadFFmpeg();
-
-        dom.exportProgressText.textContent = 'ファイルをメモリに書き込み中...';
-        
-        // 1. ファイルをFFmpegの仮想ファイルシステムに書き込む
-        const { name } = state.videoFile;
-        const outputName = `clipped-${name}`;
-        await ffmpeg.writeFile(name, await FFmpegUtil.fetchFile(state.videoFile));
-        
-        // 2. FFmpegコマンドを生成する
-        // soundZonesから、動画のどの部分を残すかのフィルター文字列を生成
-        const filter_complex = state.soundZones
-            .map((zone, index) => `[0:v]trim=start=${zone.start}:end=${zone.end},setpts=PTS-STARTPTS[v${index}];` +
-                                 `[0:a]atrim=start=${zone.start}:end=${zone.end},asetpts=PTS-STARTPTS[a${index}];`)
-            .join('');
-        
-        const concat_filter = state.soundZones
-            .map((_, index) => `[v${index}][a${index}]`)
-            .join('') + `concat=n=${state.soundZones.length}:v=1:a=1[outv][outa]`;
-        
-        const command = [
-            '-i', name,
-            '-filter_complex', `${filter_complex}${concat_filter}`,
-            '-map', '[outv]',
-            '-map', '[outa]',
-            outputName
-        ];
-        
-        // 3. FFmpegコマンドを実行
-        await ffmpeg.exec(...command);
-        
-        // 4. 結果を読み込んでダウンロードさせる
-        dom.exportProgressText.textContent = 'ファイルを生成中...';
-        const data = await ffmpeg.readFile(outputName);
-        
-        const blob = new Blob([data.buffer], { type: 'video/mp4' });
-        const url = URL.createObjectURL(blob);
-        
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = outputName;
-        a.click();
-        
-        URL.revokeObjectURL(url);
-        
-        dom.exportProgress.classList.add('hidden');
-    } catch (error) {
-        console.error('書き出し中にエラーが発生しました:', error);
-        alert('動画の書き出しに失敗しました。');
-    } finally {
-        dom.exportButton.disabled = false;
-    }
-}
     
     // ===================================================================================
     // --- EVENT LISTENERS ---
     // ===================================================================================
 
-    // File Drop Zone events
     dom.fileDropZone.addEventListener('click', () => dom.fileInput.click());
     dom.fileInput.addEventListener('change', (e) => handleFileSelect(e.target.files[0]));
-    dom.fileDropZone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dom.fileDropZone.classList.add('dragover');
-    });
+    dom.fileDropZone.addEventListener('dragover', (e) => { e.preventDefault(); dom.fileDropZone.classList.add('dragover'); });
     dom.fileDropZone.addEventListener('dragleave', () => dom.fileDropZone.classList.remove('dragover'));
     dom.fileDropZone.addEventListener('drop', (e) => {
         e.preventDefault();
@@ -838,24 +694,19 @@ async function exportVideo() {
         handleFileSelect(e.dataTransfer.files[0]);
     });
     
-    // Worker message handler
     worker.onmessage = (e) => {
         const { type, payload } = e.data;
         if (type === 'PROGRESS') {
             setProcessingState(true, payload.text);
         } else if (type === 'HISTOGRAM_DATA') {
-            drawHistogram(payload);
+            state.audioData = new Float32Array(payload.audioDataBuffer);
+            drawHistogram(payload.volumes);
         } else if (type === 'ANALYSIS_COMPLETE') {
-            // Restore audio data buffer after transfer
-            state.audioData = new Float32Array(e.data.payload.audioDataBuffer);
-            
             state.soundZones = payload.soundZones;
             setProcessingState(false);
-            
             if (state.soundZones.length > 0) {
                 dom.videoPlayer.currentTime = state.soundZones[0].start;
                 state.currentSoundZoneIndex = 0;
-                console.log('Analysis complete. Sound zones:', state.soundZones);
             } else {
                 alert('解析の結果、音声区間が見つかりませんでした。');
             }
@@ -864,7 +715,6 @@ async function exportVideo() {
 
     dom.exportButton.addEventListener('click', exportVideo);
     
-    // Slider events
     const sliders = [
         { el: dom.thresholdSlider, elValue: dom.thresholdValue, unit: ' dB' },
         { el: dom.chunkSizeSlider, elValue: dom.chunkSizeValue, unit: ' ms' },
@@ -872,19 +722,14 @@ async function exportVideo() {
         { el: dom.paddingSlider, elValue: dom.paddingValue, unit: ' ms' },
     ];
     sliders.forEach(({el, elValue, unit}) => {
-        el.addEventListener('input', () => {
-            elValue.textContent = `${el.value}${unit}`;
-        });
-        // Re-analyze when user stops dragging the slider
+        el.addEventListener('input', () => { elValue.textContent = `${el.value}${unit}`; });
         el.addEventListener('change', triggerAnalysis);
     });
     
-    // Video player events
     dom.videoPlayer.addEventListener('timeupdate', handleTimeUpdate);
     dom.videoPlayer.addEventListener('seeking', () => {
-        // Find the correct sound zone to be in after user seeks
         const currentTime = dom.videoPlayer.currentTime;
-        const zoneIndex = state.soundZones.findIndex(zone => currentTime >= zone.start && currentTime < zone.end);
+        const zoneIndex = state.soundZones.findIndex(z => currentTime >= z.start && currentTime < z.end);
         state.currentSoundZoneIndex = (zoneIndex !== -1) ? zoneIndex : 0;
     });
 
