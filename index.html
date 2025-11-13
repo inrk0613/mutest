@@ -1,5 +1,51 @@
 <!DOCTYPE html>
 <html lang="ja">
+    // 【変更後】の loadFFmpeg 関数
+async function loadFFmpeg() {
+    if (ffmpeg && ffmpeg.loaded) return;
+    
+    // この関数を呼び出す側でUIテキストを設定するので、ここでは汎用的なテキストにするか、削除
+    const originalText = dom.progressText.textContent; // 元のテキストを保持
+    setProcessingState(true, '書き出しエンジンをロード中...');
+    
+    ffmpeg = new FFmpeg.FFmpeg();
+    ffmpeg.on('log', ({ message }) => {
+        console.log(message);
+    });
+    ffmpeg.on('progress', ({ progress }) => {
+        // 汎用的な進捗表示
+        if (progress > 0 && progress < 1) {
+            const percent = Math.round(progress * 100);
+            dom.exportProgressBar.value = percent;
+            // テキストは更新しない、または汎用的なものにする
+        }
+    });
+    
+    const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm"; // バージョンを更新
+    await ffmpeg.load({
+        coreURL: await FFmpegUtil.toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
+        wasmURL: await FFmpegUtil.toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
+    });
+
+    console.log('FFmpeg loaded.');
+    // ロードが終わったら、UIを元の状態に戻すか、呼び出し元に制御を返す
+    setProcessingState(false);
+    dom.progressText.textContent = originalText;
+}
+
+// 変更点の反映のため、unpkgのURLも最新の推奨バージョンに更新しました。
+// @ffmpeg/ffmpeg@0.11.6 → @ffmpeg/ffmpeg@0.12.10
+// @ffmpeg/util@0.11.0 → @ffmpeg/util@0.12.1
+// @ffmpeg/core@0.11.0 → @ffmpeg/core@0.12.6
+// head内のscriptタグも対応するバージョンに更新してください。
+/*
+<head>
+...
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/ffmpeg.min.js" defer></script>
+    <script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/util.min.js" defer></script>
+...
+</head>
+*/
     <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
 <script src="https://unpkg.com/@ffmpeg/util@0.11.0/dist/util.min.js"></script>
 </head>
@@ -515,42 +561,77 @@
      * Handles file selection (drag-drop or click)
      * @param {File} file The selected video file.
      */
-    async function handleFileSelect(file) {
-        if (!file || !file.type.startsWith('video/')) {
-            alert('有効なビデオファイルを選択してください。');
-            return;
-        }
-        
-        state.videoFile = file;
-        setProcessingState(true, 'ファイルを読み込み中...');
-
-        if (state.videoObjectURL) {
-            URL.revokeObjectURL(state.videoObjectURL);
-        }
-        state.videoObjectURL = URL.createObjectURL(file);
-        dom.videoPlayer.src = state.videoObjectURL;
-
-        dom.fileDropZone.classList.add('hidden');
-        dom.videoWrapper.style.display = 'block';
-        
-        try {
-            const fileBuffer = await file.arrayBuffer();
-            // Using a temporary AudioContext to decode audio data fast on the main thread
-            // just to get the raw data. The heavy lifting happens in the worker.
-            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            const audioBuffer = await audioContext.decodeAudioData(fileBuffer);
-            
-            state.audioData = audioBuffer.getChannelData(0);
-            state.sampleRate = audioBuffer.sampleRate;
-            
-            triggerAnalysis();
-        } catch (err) {
-            console.error('Error processing audio:', err);
-            alert('音声トラックの処理に失敗しました。ファイルが破損しているか、サポートされていない形式の可能性があります。');
-            setProcessingState(false);
-        }
+    // 【変更後】の handleFileSelect 関数
+async function handleFileSelect(file) {
+    if (!file || !file.type.startsWith('video/')) {
+        alert('有効なビデオファイルを選択してください。');
+        return;
     }
     
+    state.videoFile = file;
+    setProcessingState(true, 'ファイルを読み込み中...');
+
+    if (state.videoObjectURL) {
+        URL.revokeObjectURL(state.videoObjectURL);
+    }
+    state.videoObjectURL = URL.createObjectURL(file);
+    dom.videoPlayer.src = state.videoObjectURL;
+
+    dom.fileDropZone.classList.add('hidden');
+    dom.videoWrapper.style.display = 'block';
+    
+    try {
+        // FFmpegを使って音声トラックを抽出・デコードする
+        const audioBuffer = await extractAudioWithFFmpeg(file);
+        
+        state.audioData = audioBuffer.getChannelData(0); // チャンネルは最初のもの(モノラル)を使用
+        state.sampleRate = audioBuffer.sampleRate;
+        
+        // 音声データが取得できたので、解析をトリガー
+        triggerAnalysis();
+    } catch (err) {
+        console.error('Error processing audio with FFmpeg:', err);
+        alert('音声トラックの処理に失敗しました。ファイルが破損しているか、サポートされていない形式の可能性があります。');
+        setProcessingState(false);
+    }
+}
+    // 【新規追加】FFmpegで音声を抽出する関数
+/**
+ * Uses FFmpeg.wasm to extract audio from a video file and decode it into an AudioBuffer.
+ * This handles codecs not supported by the browser's native decodeAudioData.
+ * @param {File} videoFile The video file.
+ * @returns {Promise<AudioBuffer>} The decoded audio data.
+ */
+async function extractAudioWithFFmpeg(videoFile) {
+    await loadFFmpeg(); // FFmpegがロードされていることを確認
+
+    setProcessingState(true, '音声トラックを抽出中...');
+    dom.exportProgressBar.value = 0; // 進捗バーをリセット
+
+    await ffmpeg.writeFile(videoFile.name, await FFmpegUtil.fetchFile(videoFile));
+
+    // FFmpegコマンド
+    // -i: 入力ファイル
+    // -vn: ビデオを無視
+    // -acodec pcm_f32le: 音声コーデックを32bit float PCMに変換 (Web Audio APIの内部形式)
+    // -ar 48000: サンプルレートを48kHzに標準化
+    const outputFilename = 'audio_for_analysis.wav';
+    await ffmpeg.exec('-i', videoFile.name, '-vn', '-acodec', 'pcm_f32le', '-ar', '48000', outputFilename);
+
+    setProcessingState(true, '音声データをデコード中...');
+    const audioData = await ffmpeg.readFile(outputFilename);
+
+    // FFmpegが出力したWAVデータを、Web Audio APIが使えるAudioBuffer形式に変換
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const audioBuffer = await audioContext.decodeAudioData(audioData.buffer);
+    
+    // 不要になった仮想ファイルを削除してメモリを解放
+    await ffmpeg.deleteFile(videoFile.name);
+    await ffmpeg.deleteFile(outputFilename);
+    
+    return audioBuffer;
+}
+        
     /**
      * Triggers the analysis in the Web Worker
      */
