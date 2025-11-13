@@ -4,8 +4,15 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Silence Cutter — 無音カット（ブラウザ完結）</title>
+
+<!-- NOTE:
+     依然として外部CDNを使います。ネットワークや拡張ブロッカーがある場合は
+     失敗するので、その旨をユーザに伝えます（後述のログで確認可能）。
+-->
+<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/ffmpeg.min.js"></script>
+
 <style>
-  /* ====== シンプルで洗練された UI (Apple的な余白とタイポグラフィ) ====== */
+  /* UIスタイル（元のものを維持） */
   :root{
     --bg:#0f1720; --card:#0b1220; --muted:#9aa6b2; --accent:#0ea5a4;
     --glass: rgba(255,255,255,0.03);
@@ -21,7 +28,7 @@
   .main{display:grid;grid-template-columns: 1fr 420px;gap:20px;margin-top:18px}
   @media(max-width:980px){.main{grid-template-columns:1fr}}
   .card{background:var(--card);padding:16px;border-radius:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,0.02)}
-  .dropzone{border:2px dashed rgba(255,255,255,0.04);padding:20px;border-radius:10px;text-align:center;cursor:pointer}
+  .dropzone{border:2px dashed rgba(255,255,255,0.04);padding:20px;border-radius:10px;text-align:center;cursor:pointer;transition: border-color 0.2s, box-shadow 0.2s}
   .dropzone.dragover{border-color:rgba(14,165,164,0.8);box-shadow:0 6px 24px rgba(14,165,164,0.06)}
   input[type=file]{display:none}
   .controls{display:flex;flex-direction:column;gap:12px;transition: opacity 0.3s ease}
@@ -50,294 +57,92 @@
 </style>
 </head>
 <body>
-<div class="wrap" role="application" aria-label="Silence Cutter">
-  <header>
-    <div class="logo">SC</div>
-    <div>
-      <h1>Silence Cutter</h1>
-      <p class="lead">動画の無音部分をブラウザ内で自動検出・プレビュー（ファイルは外部送信しません）</p>
-    </div>
-  </header>
-
-  <div class="main">
-    <!-- LEFT: ツールと結果 -->
-    <div class="card" id="left">
-      <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="動画を追加">
-        <div style="font-weight:700">ここに動画をドロップ</div>
-        <div class="small muted">または <button id="pickBtn" class="outline btn">ファイルを選択</button></div>
-        <input type="file" id="fileInput" accept="video/mp4,video/webm,video/quicktime,video/*">
-      </div>
-
-      <div style="margin-top:12px;display:flex;gap:12px;align-items:center;">
-        <div class="meta">
-          <div class="small muted">解析ステータス</div>
-        </div>
-        <div style="flex:1">
-          <div class="progress" aria-hidden="true"><i id="progressBar"></i></div>
-        </div>
-        <div id="statusText" class="small muted">待機中</div>
-      </div>
-
-      <div style="margin-top:14px" class="controls disabled" id="controls">
-        <label class="range">
-          <div class="rangeRow"><div>Threshold (dB)</div><div class="val" id="thVal">-50 dB</div></div>
-          <input id="threshold" type="range" min="-80" max="-12" step="1" value="-50">
-        </label>
-
-        <label class="range">
-          <div class="rangeRow"><div>Chunk (ms)</div><div class="val" id="chunkVal">50 ms</div></div>
-          <input id="chunk" type="range" min="10" max="200" step="5" value="50">
-        </label>
-
-        <label class="range">
-          <div class="rangeRow"><div>Min Silence (ms)</div><div class="val" id="minSilenceVal">300 ms</div></div>
-          <input id="minSilence" type="range" min="50" max="2000" step="50" value="300">
-        </label>
-
-        <label class="range">
-          <div class="rangeRow"><div>Padding (ms)</div><div class="val" id="padVal">150 ms</div></div>
-          <input id="padding" type="range" min="0" max="1000" step="10" value="150">
-        </label>
-
-        <div>
-          <canvas id="histogram" class="hist" aria-label="音量ヒストグラム"></canvas>
-          <div class="small muted" style="margin-top:6px">ヒストグラムはチャンク毎の dB 分布を示します</div>
-        </div>
-
-        <div style="display:flex;gap:10px;align-items:center;margin-top:6px">
-          <button id="analyzeBtn" class="btn" disabled>解析を実行</button>
-          <button id="clearBtn" class="outline btn">クリア</button>
-          <div style="margin-left:auto" id="analyzeSpinner" hidden><div class="spinner" aria-hidden="true"></div></div>
-        </div>
-      </div>
-
-      <div style="margin-top:14px">
-        <div class="small muted">無音区間（開始 → 終了）</div>
-        <div class="list seglist" id="silenceList">—</div>
-      </div>
-
-      <div style="margin-top:10px">
-        <div class="small muted">音声あり区間</div>
-        <div class="list seglist" id="soundList">—</div>
-      </div>
-    </div>
-
-    <!-- RIGHT: プレビュー領域 -->
-    <div class="card">
-      <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
-        <div style="flex:1"><strong id="filename">ファイル未選択</strong><div class="small muted" id="filemeta"></div></div>
-        <div style="text-align:right"><button id="playPreview" class="btn outline">プレビュー再生</button></div>
-      </div>
-
-      <video id="video" controls playsinline></video>
-
-      <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
-        <div class="small muted">再生モード:</div>
-        <div class="small"> <label><input type="checkbox" id="skipSilence" checked> 無音をスキップして再生</label></div>
-      </div>
-
-      <div style="margin-top:10px" class="small muted">ログ</div>
-      <pre id="log" style="height:120px;overflow:auto;background:rgba(0,0,0,0.25);padding:8px;border-radius:8px;color:#dff6fb"></pre>
-    </div>
-  </div>
-
-  <footer>静的ホスティング対応 — Client-only. &nbsp;データはどこにも送られません。</footer>
-</div>
+<div class="wrap" role="application" aria-label="Silence Cutter"><header><div class="logo">SC</div><div><h1>Silence Cutter</h1><p class="lead">動画の無音部分をブラウザ内で自動検出・プレビュー（ファイルは外部送信しません）</p></div></header><div class="main"><div class="card" id="left"><div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="動画を追加"><div style="font-weight:700">ここに動画をドロップ</div><div class="small muted">または <button id="pickBtn" class="outline btn">ファイルを選択</button></div><input type="file" id="fileInput" accept="video/mp4,video/webm,video/quicktime,video/*"></div><div style="margin-top:12px;display:flex;gap:12px;align-items:center;"><div class="meta"><div class="small muted">解析ステータス</div></div><div style="flex:1"><div class="progress" aria-hidden="true"><i id="progressBar"></i></div></div><div id="statusText" class="small muted">待機中</div></div><div style="margin-top:14px" class="controls disabled" id="controls"><label class="range"><div class="rangeRow"><div>Threshold (dB)</div><div class="val" id="thVal">-50 dB</div></div><input id="threshold" type="range" min="-80" max="-12" step="1" value="-50"></label><label class="range"><div class="rangeRow"><div>Chunk (ms)</div><div class="val" id="chunkVal">50 ms</div></div><input id="chunk" type="range" min="10" max="200" step="5" value="50"></label><label class="range"><div class="rangeRow"><div>Min Silence (ms)</div><div class="val" id="minSilenceVal">300 ms</div></div><input id="minSilence" type="range" min="50" max="2000" step="50" value="300"></label><label class="range"><div class="rangeRow"><div>Padding (ms)</div><div class="val" id="padVal">150 ms</div></div><input id="padding" type="range" min="0" max="1000" step="10" value="150"></label><div><canvas id="histogram" class="hist" aria-label="音量ヒストグラム"></canvas><div class="small muted" style="margin-top:6px">ヒストグラムはチャンク毎の dB 分布を示します</div></div><div style="display:flex;gap:10px;align-items:center;margin-top:6px"><button id="analyzeBtn" class="btn" disabled>解析を実行</button><button id="clearBtn" class="outline btn">クリア</button><div style="margin-left:auto" id="analyzeSpinner" hidden><div class="spinner" aria-hidden="true"></div></div></div></div><div style="margin-top:14px"><div class="small muted">無音区間（開始 → 終了）</div><div class="list seglist" id="silenceList">—</div></div><div style="margin-top:10px"><div class="small muted">音声あり区間</div><div class="list seglist" id="soundList">—</div></div></div><div class="card"><div style="display:flex;gap:10px;align-items:center;margin-bottom:8px"><div style="flex:1"><strong id="filename">ファイル未選択</strong><div class="small muted" id="filemeta"></div></div><div style="text-align:right"><button id="playPreview" class="btn outline">プレビュー再生</button></div></div><video id="video" controls playsinline></video><div style="margin-top:10px;display:flex;gap:8px;align-items:center"><div class="small muted">再生モード:</div><div class="small"> <label><input type="checkbox" id="skipSilence" checked> 無音をスキップして再生</label></div></div><div style="margin-top:10px" class="small muted">ログ</div><pre id="log" style="height:120px;overflow:auto;background:rgba(0,0,0,0.25);padding:8px;border-radius:8px;color:#dff6fb"></pre></div></div><footer>静的ホスティング対応 — Client-only. &nbsp;データはどこにも送られません。</footer></div>
 
 <script type="module">
-/**
- * Silence Cutter — main (TypeScript-style JSDoc, transpiled JS for browser)
- *
- * 実装ノート:
- * - [修正] 動画からの音声抽出ロジックを全面的に見直し。
- *   `OfflineAudioContext` の直接利用はコンテキストの制約により断念。
- *   代わりに、`AudioContext`と`ScriptProcessorNode`を用いて、ミュート再生しながら
- *   音声ストリームをリアルタイムにキャプチャし、完全なAudioBufferをメモリ上に再構築する
- *   堅牢な方式へと変更。これにより、MOVコンテナ等への対応を実現。
- * - 以降のWebWorkerでの解析フローは従来通り。
- */
-
-/* ======= ユーティリティ型/関数 ======= */
-function fmtTime(s) {
-  if (!isFinite(s)) return "NaN";
-  const ms = Math.floor((s - Math.floor(s)) * 1000);
-  const sec = Math.floor(s % 60);
-  const min = Math.floor((s / 60) % 60);
-  const hr = Math.floor(s / 3600);
-  return `${hr}:${String(min).padStart(2,"0")}:${String(sec).padStart(2,"0")}.${String(ms).padStart(3,"0")}`;
-}
-
+/* ======= ユーティリティ & DOM要素 ======= */
+function fmtTime(s) { if (!isFinite(s)) return "NaN"; const ms = Math.floor((s - Math.floor(s)) * 1000); const sec = Math.floor(s % 60); const min = Math.floor((s / 60) % 60); const hr = Math.floor(s / 3600); return `${hr}:${String(min).padStart(2,"0")}:${String(sec).padStart(2,"0")}.${String(ms).padStart(3,"0")}`; }
 const logEl = document.getElementById("log");
-function log(...args) {
-  const t = new Date().toLocaleTimeString();
-  logEl.textContent += `[${t}] ${args.join(" ")}\n`;
-  logEl.scrollTop = logEl.scrollHeight;
-}
-
-/* ======= DOM 要素 ======= */
-const dropzone = document.getElementById("dropzone");
-const fileInput = document.getElementById("fileInput");
-const pickBtn = document.getElementById("pickBtn");
-const analyzeBtn = document.getElementById("analyzeBtn");
-const clearBtn = document.getElementById("clearBtn");
-const controlsEl = document.getElementById("controls");
-const analyzeSpinner = document.getElementById("analyzeSpinner");
-const statusText = document.getElementById("statusText");
-const progressBar = document.getElementById("progressBar");
-const histogram = document.getElementById("histogram");
-const thresholdEl = document.getElementById("threshold");
-const thVal = document.getElementById("thVal");
-const chunkEl = document.getElementById("chunk");
-const chunkVal = document.getElementById("chunkVal");
-const minSilenceEl = document.getElementById("minSilence");
-const minSilenceVal = document.getElementById("minSilenceVal");
-const paddingEl = document.getElementById("padding");
-const padVal = document.getElementById("padVal");
-const silenceList = document.getElementById("silenceList");
-const soundList = document.getElementById("soundList");
-const videoEl = document.getElementById("video");
-const filenameEl = document.getElementById("filename");
-const filemetaEl = document.getElementById("filemeta");
-const playPreviewBtn = document.getElementById("playPreview");
-const skipSilenceCheckbox = document.getElementById("skipSilence");
-
-/* ======= 初期 UI 値表示 ======= */
-function updateUIValues() {
-  thVal.textContent = `${thresholdEl.value} dB`;
-  chunkVal.textContent = `${chunkEl.value} ms`;
-  minSilenceVal.textContent = `${minSilenceEl.value} ms`;
-  padVal.textContent = `${paddingEl.value} ms`;
-}
+function log(...args) { const t = new Date().toLocaleTimeString(); logEl.textContent += `[${t}] ${args.join(" ")}\n`; logEl.scrollTop = logEl.scrollHeight; }
+const dropzone = document.getElementById("dropzone"), fileInput = document.getElementById("fileInput"), pickBtn = document.getElementById("pickBtn"), analyzeBtn = document.getElementById("analyzeBtn"), clearBtn = document.getElementById("clearBtn"), controlsEl = document.getElementById("controls"), analyzeSpinner = document.getElementById("analyzeSpinner"), statusText = document.getElementById("statusText"), progressBar = document.getElementById("progressBar"), histogram = document.getElementById("histogram"), thresholdEl = document.getElementById("threshold"), thVal = document.getElementById("thVal"), chunkEl = document.getElementById("chunk"), chunkVal = document.getElementById("chunkVal"), minSilenceEl = document.getElementById("minSilence"), minSilenceVal = document.getElementById("minSilenceVal"), paddingEl = document.getElementById("padding"), padVal = document.getElementById("padVal"), silenceList = document.getElementById("silenceList"), soundList = document.getElementById("soundList"), videoEl = document.getElementById("video"), filenameEl = document.getElementById("filename"), filemetaEl = document.getElementById("filemeta"), playPreviewBtn = document.getElementById("playPreview"), skipSilenceCheckbox = document.getElementById("skipSilence");
+function updateUIValues() { thVal.textContent = `${thresholdEl.value} dB`; chunkVal.textContent = `${chunkEl.value} ms`; minSilenceVal.textContent = `${minSilenceEl.value} ms`; padVal.textContent = `${paddingEl.value} ms`; }
 updateUIValues();
-thresholdEl.addEventListener("input", updateUIValues);
-chunkEl.addEventListener("input", updateUIValues);
-minSilenceEl.addEventListener("input", updateUIValues);
-paddingEl.addEventListener("input", updateUIValues);
+[thresholdEl, chunkEl, minSilenceEl, paddingEl].forEach(el => el.addEventListener("input", updateUIValues));
 
-/* ======= ドラッグ＆ドロップ / ファイル選択 ======= */
-pickBtn.addEventListener("click", ()=> fileInput.click());
-dropzone.addEventListener("click", ()=> fileInput.click());
-fileInput.addEventListener("change", (e)=> {
-  const f = e.target.files[0];
-  if (f) handleFile(f);
-});
-
-["dragenter","dragover"].forEach(ev=>{
-  dropzone.addEventListener(ev, (e)=>{ e.preventDefault(); e.stopPropagation(); dropzone.classList.add("dragover"); });
-});
-["dragleave","drop"].forEach(ev=>{
-  dropzone.addEventListener(ev, (e)=>{ e.preventDefault(); e.stopPropagation(); dropzone.classList.remove("dragover"); });
-});
-dropzone.addEventListener("drop", (e)=>{
-  const f = e.dataTransfer.files[0];
-  if (f) handleFile(f);
-});
+/* ======= ファイル選択/D&Dイベント ======= */
+pickBtn.addEventListener("click", () => fileInput.click()); dropzone.addEventListener("click", () => fileInput.click()); fileInput.addEventListener("change", (e) => { const f = e.target.files[0]; if (f) handleFile(f); });
+["dragenter", "dragover"].forEach(evName => { dropzone.addEventListener(evName, (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.add("dragover"); }); });
+["dragleave", "drop"].forEach(evName => { dropzone.addEventListener(evName, (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.remove("dragover"); }); });
+dropzone.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) handleFile(f); });
 
 /* ======= 状態変数 ======= */
-let currentFile = null;
-let audioBufferGlobal = null;
-let sampleRate = 48000;
-let worker = null;
-let lastRmsDbArray = null;
-let soundSegments = [];
-let silenceSegments = [];
-let autoSeekHandler = null;
+let currentFile = null, audioBufferGlobal = null, worker = null, lastRmsDbArray = null, soundSegments = [], silenceSegments = [], autoSeekHandler = null, ffmpeg = null;
 
-/* ======= Worker 作成 ======= */
-function createWorker() {
-  const workerCode = `
-  self.onmessage = function(ev) {
-    const { cmd, channelData, sampleRate, chunkMs } = ev.data;
-    if (cmd === 'analyze') {
-      const channels = channelData.map(b => new Float32Array(b));
-      const length = channels[0].length;
-      const framesPerChunk = Math.max(1, Math.floor(sampleRate * (chunkMs/1000)));
-      const nChunks = Math.ceil(length / framesPerChunk);
-      const rmsDb = new Float32Array(nChunks);
-      const chCount = channels.length;
-      for (let cIdx = 0; cIdx < nChunks; cIdx++) {
-        const start = cIdx * framesPerChunk;
-        const end = Math.min(length, start + framesPerChunk);
-        let sumSq = 0.0;
-        for (let ch = 0; ch < chCount; ch++){
-          const chArr = channels[ch];
-          for (let i = start; i < end; i++){
-            sumSq += chArr[i] * chArr[i];
-          }
-        }
-        const samples = (end - start) * chCount;
-        const meanSq = samples > 0 ? (sumSq / samples) : 0;
-        const rms = Math.sqrt(meanSq);
-        const db = rms > 0 ? (20 * Math.log10(rms)) : -200.0;
-        rmsDb[cIdx] = db;
-        if ((cIdx & 255) === 0) {
-          self.postMessage({ type: 'progress', progress: cIdx / nChunks });
-        }
+/* ======= FFmpeg.wasm の初期化（堅牢化） ======= */
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function loadFFmpeg() {
+  if (ffmpeg) return ffmpeg;
+  statusText.textContent = "解析エンジンを待機中...";
+  log("FFmpeg: loading libraries...");
+
+  // try multiple strategies for broad compatibility:
+  // 1) If window.FFmpeg (UMD) exists -> use it
+  // 2) else try dynamic import of ESM bundle
+  // 3) on failure, give a helpful error message
+  const coreURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/ffmpeg-core.js"; // core script URL
+
+  try {
+    let createFFmpegFunc = null;
+    let fetchFileFunc = null;
+
+    if (window.FFmpeg && typeof window.FFmpeg.createFFmpeg === "function") {
+      // UMD loaded (script tag succeeded)
+      ({ createFFmpeg: createFFmpegFunc, fetchFile: fetchFileFunc } = window.FFmpeg);
+      log("FFmpeg: UMD detected on window.FFmpeg");
+    } else {
+      // try dynamic import as a fallback (some CDNs/E2E setups)
+      try {
+        const mod = await import('https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/ffmpeg.min.js');
+        createFFmpegFunc = mod.createFFmpeg || mod.default?.createFFmpeg;
+        fetchFileFunc = mod.fetchFile || mod.default?.fetchFile;
+        log("FFmpeg: dynamic import succeeded");
+      } catch (impErr) {
+        console.warn("dynamic import failed:", impErr);
       }
-      self.postMessage({ type:'done', rmsDb: rmsDb.buffer }, [rmsDb.buffer]);
     }
-  };`;
-  return new Worker(URL.createObjectURL(new Blob([workerCode], {type:'application/javascript'})));
+
+    if (!createFFmpegFunc) throw new Error("createFFmpeg not available (blocked or network error)");
+
+    // create ffmpeg instance and set progress callback
+    ffmpeg = createFFmpegFunc({
+      log: false,
+      corePath: coreURL // ensure core is fetched from CDN
+    });
+
+    // attach fetchFile helper (some bundles expose it separately)
+    if (fetchFileFunc) ffmpeg.fetchFile = fetchFileFunc;
+
+    // progress handler
+    if (typeof ffmpeg.setProgress === "function") {
+      ffmpeg.setProgress(({ ratio }) => {
+        const p = Math.min(1, Math.max(0, ratio || 0));
+        progressBar.style.width = `${15 + Math.round(p * 80)}%`;
+        statusText.textContent = `音声トラックを抽出中... ${Math.round(p * 100)}%`;
+      });
+    }
+
+    statusText.textContent = "FFmpeg コアを読み込み中...";
+    await ffmpeg.load(); // may fetch core wasm
+    log("FFmpeg core loaded.");
+    return ffmpeg;
+  } catch (err) {
+    console.error("FFmpeg load failed", err);
+    throw new Error("FFmpeg libraries failed to load. Check network, CORS, or ad-blockers. (" + (err && err.message) + ")");
+  }
 }
 
-/**
- * [コア修正] ScriptProcessorNode を使用して動画から AudioBuffer を抽出する
- * @param {HTMLVideoElement} videoElement
- * @returns {Promise<AudioBuffer>}
- */
-function extractAudioBufferFromVideo(videoElement) {
-  return new Promise(async (resolve, reject) => {
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const source = audioCtx.createMediaElementSource(videoElement);
-    const bufferSize = 4096;
-    const channels = 2; // ステレオで処理
-    const scriptProcessor = audioCtx.createScriptProcessor(bufferSize, channels, channels);
-
-    const channelData = Array.from({ length: channels }, () => []);
-    let totalSamples = 0;
-
-    scriptProcessor.onaudioprocess = (e) => {
-      // データをチャンネルごとにコピーして蓄積
-      for (let i = 0; i < channels; i++) {
-        const inputData = e.inputBuffer.getChannelData(i);
-        // 新しいFloat32Arrayにコピーしてメモリリークを防ぐ
-        const clonedData = new Float32Array(inputData);
-        channelData[i].push(clonedData);
-      }
-      totalSamples += e.inputBuffer.length;
-      progressBar.style.width = `${10 + (videoElement.currentTime / videoElement.duration) * 40}%`;
-      statusText.textContent = `音声抽出中... ${Math.round((videoElement.currentTime / videoElement.duration) * 100)}%`;
-    };
-
-    videoElement.onended = () => {
-      // 処理完了後、接続を解除
-      source.disconnect();
-      scriptProcessor.disconnect();
-
-      // 蓄積したデータから単一のAudioBufferを生成
-      const finalBuffer = audioCtx.createBuffer(channels, totalSamples, audioCtx.sampleRate);
-      let offset = 0;
-      for (let i = 0; i < channelData[0].length; i++) {
-        for (let ch = 0; ch < channels; ch++) {
-          finalBuffer.getChannelData(ch).set(channelData[ch][i], offset);
-        }
-        offset += channelData[0][i].length;
-      }
-      resolve(finalBuffer);
-    };
-
-    videoElement.onerror = (e) => reject(new Error("動画の再生中にエラーが発生しました。"));
-
-    // 処理開始
-    source.connect(scriptProcessor);
-    scriptProcessor.connect(audioCtx.destination);
-    videoElement.muted = true;
-    await videoElement.play().catch(reject);
-  });
-}
-
-
-/* ======= ファイル処理フロー ======= */
+/* ======= ファイル処理フロー（FFmpeg版） ======= */
 async function handleFile(file) {
   clearAll();
   currentFile = file;
@@ -345,70 +150,92 @@ async function handleFile(file) {
   filemetaEl.textContent = `${(file.size / 1024 / 1024).toFixed(2)} MB`;
   log("ファイル選択:", file.name);
 
+  // safety: warn for very large files
+  if (file.size > 300 * 1024 * 1024) {
+    if (!confirm("ファイルサイズが大きいです（>300MB）。処理中にメモリが不足する場合があります。続行しますか？")) {
+      clearAll();
+      return;
+    }
+  }
+
   controlsEl.classList.add("disabled");
   analyzeBtn.disabled = true;
   analyzeSpinner.hidden = false;
-  statusText.textContent = "動画ファイルを準備中...";
   progressBar.style.width = "5%";
 
-  const url = URL.createObjectURL(file);
-  videoEl.src = url;
-
   try {
-    await new Promise((resolve, reject) => {
-      videoEl.onloadedmetadata = resolve;
-      videoEl.onerror = () => reject(new Error("動画ファイルの読み込みに失敗しました。"));
-    });
+    // set video preview quickly (no need to wait)
+    videoEl.src = URL.createObjectURL(file);
 
-    log("メタデータ読み込み完了. duration:", videoEl.duration.toFixed(2), "s");
-    statusText.textContent = "音声データを抽出中...";
+    // load ffmpeg runtime
+    await loadFFmpeg();
+    statusText.textContent = "ファイルを読込中...";
     progressBar.style.width = "10%";
 
-    // 修正された音声抽出ロジックを呼び出す
-    const extractedBuffer = await extractAudioBufferFromVideo(videoEl);
-    
-    audioBufferGlobal = extractedBuffer;
-    sampleRate = extractedBuffer.sampleRate;
+    const inputName = "input_" + Date.now() + "_" + file.name.replace(/\s+/g, "_");
+    const outputFilename = "output.wav";
 
-    log("音声抽出完了. SampleRate:", sampleRate, "Hz");
+    // write file into ffmpeg FS
+    // use ffmpeg.fetchFile helper if provided (most bundles include it)
+    const fetchFileFunc = ffmpeg.fetchFile || window.FFmpeg?.fetchFile;
+    let dataToWrite;
+    if (fetchFileFunc) {
+      dataToWrite = await fetchFileFunc(file);
+    } else {
+      // fallback: read via File.arrayBuffer
+      const ab = await file.arrayBuffer();
+      dataToWrite = new Uint8Array(ab);
+    }
+    ffmpeg.FS('writeFile', inputName, dataToWrite);
+    log("FFmpeg: file written to virtual FS:", inputName);
+
+    // run extraction - use run()
+    statusText.textContent = "音声トラックを抽出中...";
+    await ffmpeg.run('-i', inputName, '-vn', '-acodec', 'pcm_f32le', '-ar', '48000', '-y', outputFilename);
+    log("FFmpeg: audio extraction complete.");
+
+    // read result
+    const outData = ffmpeg.FS('readFile', outputFilename);
+    // convert to ArrayBuffer correctly
+    const arrayBuffer = outData.buffer.slice(outData.byteOffset, outData.byteOffset + outData.byteLength);
+
+    // decode audio
+    statusText.textContent = "音声データをデコード中...";
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    // Some browsers require resume on user gesture; try to resume politely
+    if (audioCtx.state === 'suspended') {
+      try { await audioCtx.resume(); } catch (e) { /* ignore */ }
+    }
+    audioBufferGlobal = await audioCtx.decodeAudioData(arrayBuffer);
+    log("音声抽出・デコード完了. SampleRate:", audioBufferGlobal.sampleRate, "Hz");
+
+    // cleanup FS to free memory
+    try { ffmpeg.FS('unlink', outputFilename); ffmpeg.FS('unlink', inputName); } catch(e){/* ignore */}
+
     statusText.textContent = "解析準備完了";
-    progressBar.style.width = "50%"; // 抽出が終わった時点で50%
+    progressBar.style.width = "50%";
     controlsEl.classList.remove("disabled");
     analyzeBtn.disabled = false;
-    
   } catch (err) {
     console.error(err);
     statusText.textContent = "音声抽出に失敗";
     progressBar.style.width = "0%";
-    log("エラー:", err.message || "動画から音声の抽出に失敗しました。");
+    log("エラー:", err.message || "動画から音声の抽出に失敗しました。ネットワーク/ブロッカーを疑ってください。");
+    // give user actionable hint
+    log("ヒント: ブラウザの拡張（広告ブロック）や企業ネットワークのCORSポリシーによりCDNがブロックされる場合があります。");
   } finally {
     analyzeSpinner.hidden = true;
-    videoEl.muted = false; // プレビューのためにミュートを解除
   }
 }
 
-/* ======= 解析実行 ======= */
+/* ======= 解析（Worker） ======= */
+function createWorker() { const workerCode = `self.onmessage = function(ev) { const { cmd, channelData, sampleRate, chunkMs } = ev.data; if (cmd === 'analyze') { const channels = channelData.map(b => new Float32Array(b)); const length = channels[0].length; const framesPerChunk = Math.max(1, Math.floor(sampleRate * (chunkMs/1000))); const nChunks = Math.ceil(length / framesPerChunk); const rmsDb = new Float32Array(nChunks); const chCount = channels.length; for (let cIdx = 0; cIdx < nChunks; cIdx++) { const start = cIdx * framesPerChunk; const end = Math.min(length, start + framesPerChunk); let sumSq = 0.0; for (let ch = 0; ch < chCount; ch++){ for (let i = start; i < end; i++){ sumSq += channels[ch][i] * channels[ch][i]; } } const samples = (end - start) * chCount; const meanSq = samples > 0 ? (sumSq / samples) : 0; const rms = Math.sqrt(meanSq); const db = rms > 0 ? (20 * Math.log10(rms)) : -200.0; rmsDb[cIdx] = db; if ((cIdx & 255) === 0) self.postMessage({ type: 'progress', progress: cIdx / nChunks }); } self.postMessage({ type:'done', rmsDb: rmsDb.buffer }, [rmsDb.buffer]); } };`; return new Worker(URL.createObjectURL(new Blob([workerCode], {type:'application/javascript'}))); }
+
 async function analyze() {
-  if (!audioBufferGlobal) { alert("先に動画を選択し、音声データの準備が完了するまでお待ちください。"); return; }
-  
-  analyzeBtn.disabled = true; clearBtn.disabled = true; analyzeSpinner.hidden = false;
-  controlsEl.classList.add("disabled");
-  statusText.textContent = "解析中...";
-  progressBar.style.width = "55%";
-  log("解析開始");
-
-  const { value: thresholdDb } = thresholdEl;
-  const { value: chunkMs } = chunkEl;
-  const { value: minSilenceMs } = minSilenceEl;
-  const { value: paddingMs } = paddingEl;
-
-  const chCount = audioBufferGlobal.numberOfChannels;
-  const channelData = [];
-  for (let c = 0; c < chCount; c++) {
-    const arr = audioBufferGlobal.getChannelData(c).slice(0); // コピーを渡す
-    channelData.push(arr.buffer);
-  }
-
+  if (!audioBufferGlobal) { alert("先に動画を選択してください。"); return; }
+  analyzeBtn.disabled = true; clearBtn.disabled = true; analyzeSpinner.hidden = false; controlsEl.classList.add("disabled"); statusText.textContent = "解析中..."; progressBar.style.width = "55%"; log("解析開始");
+  const thresholdDb = Number(thresholdEl.value), chunkMs = Number(chunkEl.value), minSilenceMs = Number(minSilenceEl.value), paddingMs = Number(paddingEl.value);
+  const channelData = Array.from({ length: audioBufferGlobal.numberOfChannels }, (_, c) => audioBufferGlobal.getChannelData(c).slice(0).buffer);
   worker && worker.terminate();
   worker = createWorker();
   worker.onmessage = (ev) => {
@@ -420,218 +247,41 @@ async function analyze() {
     } else if (type === 'done') {
       progressBar.style.width = "100%";
       statusText.textContent = "解析完了";
-      analyzeSpinner.hidden = true;
-      analyzeBtn.disabled = false; clearBtn.disabled = false;
-      controlsEl.classList.remove("disabled");
-      
+      analyzeBtn.disabled = false; clearBtn.disabled = false; controlsEl.classList.remove("disabled"); analyzeSpinner.hidden = true;
       const dbArr = new Float32Array(rmsDb);
       lastRmsDbArray = dbArr;
       log("RMS->dB チャンク数:", dbArr.length);
-      
-      const {soundSegs, silenceSegs} = generateSegmentsFromDbArray(dbArr, {
-        chunkMs: Number(chunkMs), 
-        thresholdDb: Number(thresholdDb), 
-        minSilenceMs: Number(minSilenceMs), 
-        paddingMs: Number(paddingMs), 
-        totalDuration: audioBufferGlobal.duration
-      });
-      soundSegments = soundSegs;
-      silenceSegments = silenceSegs;
-      renderSegments();
-      drawHistogram(dbArr);
+      const { soundSegs, silenceSegs } = generateSegmentsFromDbArray(dbArr, { chunkMs, thresholdDb, minSilenceMs, paddingMs, totalDuration: audioBufferGlobal.duration });
+      soundSegments = soundSegs; silenceSegments = silenceSegs;
+      renderSegments(); drawHistogram(dbArr);
       log("無音セグメント数:", silenceSegs.length, "音声セグメント数:", soundSegs.length);
     }
   };
-
-  worker.postMessage({ cmd:'analyze', channelData, sampleRate, chunkMs: Number(chunkMs) }, channelData);
+  worker.postMessage({ cmd:'analyze', channelData, sampleRate: audioBufferGlobal.sampleRate, chunkMs }, channelData);
 }
 
-/* ======= DB配列 -> セグメント生成ロジック ======= */
-function generateSegmentsFromDbArray(dbArr, opts) {
-  const { chunkMs, thresholdDb, minSilenceMs, paddingMs, totalDuration } = opts;
-  const n = dbArr.length;
-  const isSilent = dbArr.map(db => db < thresholdDb);
-  
-  const silenceIntervalsRaw = [];
-  let i = 0;
-  while (i < n) {
-    if (isSilent[i]) {
-      const startChunk = i;
-      while (i < n && isSilent[i]) i++;
-      const endChunk = i - 1;
-      const startMs = startChunk * chunkMs;
-      const endMs = (endChunk + 1) * chunkMs;
-      if ((endMs - startMs) >= minSilenceMs) {
-        silenceIntervalsRaw.push({start: startMs, end: endMs});
-      }
-    } else {
-      i++;
-    }
-  }
-  
-  const silenceIntervals = silenceIntervalsRaw.map(interval => ({
-    start: Math.max(0, (interval.start - paddingMs) / 1000),
-    end: Math.min(totalDuration, (interval.end + paddingMs) / 1000)
-  }));
+/* ======= セグメント生成、描画、プレビュー、クリア ======= */
+function generateSegmentsFromDbArray(dbArr, opts) { const { chunkMs, thresholdDb, minSilenceMs, paddingMs, totalDuration } = opts; const isSilent = dbArr.map(db => db < thresholdDb); const silenceIntervalsRaw = []; for (let i = 0; i < isSilent.length; i++) { if (isSilent[i]) { const startChunk = i; while (i < isSilent.length && isSilent[i]) i++; const endChunk = i - 1; if ((endChunk - startChunk + 1) * chunkMs >= minSilenceMs) { silenceIntervalsRaw.push({ start: startChunk * chunkMs, end: (endChunk + 1) * chunkMs }); } } } const silenceIntervals = silenceIntervalsRaw.map(iv => ({ start: Math.max(0, (iv.start - paddingMs) / 1000), end: Math.min(totalDuration, (iv.end + paddingMs) / 1000) })); const soundIntervals = []; let cur = 0.0; silenceIntervals.forEach(sil => { if (cur < sil.start) soundIntervals.push({ start: cur, end: sil.start }); cur = Math.max(cur, sil.end); }); if (cur < totalDuration) soundIntervals.push({ start: cur, end: totalDuration }); return { soundSegs: soundIntervals.filter(s => s.end - s.start > 0.01), silenceSegs: silenceIntervals }; }
+function drawHistogram(dbArr) { const canvas = histogram; const dpr = window.devicePixelRatio || 1; canvas.width = canvas.clientWidth * dpr; canvas.height = canvas.clientHeight * dpr; const ctx = canvas.getContext("2d"); if (!ctx) return; ctx.clearRect(0,0,canvas.width,canvas.height); const buckets = 60; const minDb = -100, maxDb = 0; const counts = new Uint32Array(buckets); for (const v of dbArr) { if (v > minDb) { const idx = Math.floor(((Math.min(maxDb, v) - minDb) / (maxDb - minDb)) * (buckets-1)); counts[idx]++; } } const maxC = Math.max(1, ...counts); const w = canvas.width, h = canvas.height; const barW = w / buckets; ctx.fillStyle = "rgba(14, 165, 164, 0.4)"; for (let b=0;b<buckets;b++){ const hh = (counts[b] / maxC) * h; ctx.fillRect(b*barW, h-hh, Math.max(1, barW * 0.85), hh); } ctx.fillStyle = "rgba(255,255,255,0.4)"; ctx.font = `${10*dpr}px var(--font-sans)`; ctx.textAlign = "left"; ctx.fillText(`${minDb} dB`, 4*dpr, 12*dpr); ctx.textAlign = "right"; ctx.fillText(`${maxDb} dB`, w - 4*dpr, 12*dpr); }
+function renderSegments() { const formatList = (segs, isSound) => segs.length === 0 ? "検出なし" : segs.map((s,i) => isSound ? `[${String(i).padStart(2,"0")}] ${fmtTime(s.start)} → ${fmtTime(s.end)}` : `${fmtTime(s.start)} → ${fmtTime(s.end)}`).join("\n"); silenceList.innerHTML = formatList(silenceSegments, false); soundList.innerHTML = formatList(soundSegments, true); }
+function startPreview(){ videoEl.play(); if (skipSilenceCheckbox.checked) setupAutoSkip(); }
+function stopPreview(){ videoEl.pause(); removeAutoSkip(); }
+function setupAutoSkip() { removeAutoSkip(); let idx = findSegmentIndexAtTime(videoEl.currentTime); if (idx < 0) { idx = soundSegments.findIndex(s => s.start > videoEl.currentTime); if(idx < 0) idx = 0; } if (!soundSegments[idx]) return; const jumpToSegment = (index) => { if (soundSegments[index]) videoEl.currentTime = soundSegments[index].start + 0.01; else stopPreview(); }; if(isTimeInSilence(videoEl.currentTime) || videoEl.currentTime < soundSegments[idx].start) jumpToSegment(idx); autoSeekHandler = () => { if(!soundSegments[idx]) { stopPreview(); return; } if (videoEl.currentTime >= soundSegments[idx].end - 0.1) { idx++; jumpToSegment(idx); } }; videoEl.addEventListener("timeupdate", autoSeekHandler); }
+function removeAutoSkip(){ if (autoSeekHandler) videoEl.removeEventListener("timeupdate", autoSeekHandler); autoSeekHandler = null; }
+function isTimeInSilence(t) { return silenceSegments.some(s => t >= s.start && t < s.end); }
+function findSegmentIndexAtTime(t) { return soundSegments.findIndex(s => t >= s.start && t < s.end); }
+function clearAll() { stopPreview(); currentFile = null; audioBufferGlobal = null; lastRmsDbArray = null; soundSegments = []; silenceSegments = []; filenameEl.textContent = "ファイル未選択"; filemetaEl.textContent = ""; silenceList.textContent = "—"; soundList.textContent = "—"; if (videoEl.src) { try { URL.revokeObjectURL(videoEl.src); } catch(e){} videoEl.removeAttribute("src"); videoEl.load(); } const ctx = histogram.getContext("2d"); if(ctx) ctx.clearRect(0,0,histogram.width,histogram.height); progressBar.style.width = "0%"; statusText.textContent = "待機中"; controlsEl.classList.add("disabled"); analyzeBtn.disabled = true; log("クリアしました"); }
 
-  const soundIntervals = [];
-  let cur = 0.0;
-  for (const sil of silenceIntervals) {
-    if (cur < sil.start) soundIntervals.push({start:cur, end: sil.start});
-    cur = Math.max(cur, sil.end);
-  }
-  if (cur < totalDuration) soundIntervals.push({start:cur, end: totalDuration});
-  return { soundSegs: soundIntervals.filter(s => s.end - s.start > 0.01), silenceSegs: silenceIntervals };
-}
-
-/* ======= ヒストグラム描画 ======= */
-function drawHistogram(dbArr) {
-  const canvas = histogram;
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = canvas.clientWidth * dpr;
-  canvas.height = canvas.clientHeight * dpr;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-
-  const buckets = 60;
-  const minDb = -100, maxDb = 0;
-  const counts = new Uint32Array(buckets);
-  for (const v of dbArr) {
-    if (v > minDb) {
-      const idx = Math.floor(((Math.min(maxDb, v) - minDb) / (maxDb - minDb)) * (buckets-1));
-      counts[idx]++;
-    }
-  }
-  const maxC = Math.max(1, ...counts);
-  const w = canvas.width, h = canvas.height;
-  const barW = w / buckets;
-  ctx.fillStyle = "rgba(14, 165, 164, 0.4)";
-  for (let b=0;b<buckets;b++){
-    const hh = (counts[b] / maxC) * h;
-    ctx.fillRect(b*barW, h-hh, Math.max(1, barW * 0.85), hh);
-  }
-  
-  ctx.fillStyle = "rgba(255,255,255,0.4)";
-  ctx.font = `${10*dpr}px var(--font-sans)`;
-  ctx.textAlign = "left";
-  ctx.fillText(`${minDb} dB`, 4*dpr, 12*dpr);
-  ctx.textAlign = "right";
-  ctx.fillText(`${maxDb} dB`, w - 4*dpr, 12*dpr);
-}
-
-/* ======= セグメント表示 ======= */
-function renderSegments() {
-  const formatList = (segs, isSound) => segs.length === 0 
-    ? "検出なし" 
-    : segs.map((s,i) => isSound
-        ? `[${String(i).padStart(2,"0")}] ${fmtTime(s.start)} → ${fmtTime(s.end)}`
-        : `${fmtTime(s.start)} → ${fmtTime(s.end)}`
-      ).join("\n");
-
-  silenceList.innerHTML = formatList(silenceSegments, false);
-  soundList.innerHTML = formatList(soundSegments, true);
-}
-
-/* ======= プレビュー（無音スキップ） ======= */
-playPreviewBtn.addEventListener("click", ()=>{
-  if (!videoEl.src || !currentFile) { alert("先に動画を選択してください"); return; }
-  if (skipSilenceCheckbox.checked && soundSegments.length===0) {
-    alert("解析結果がありません。先に解析を実行してください。");
-    return;
-  }
-  if (videoEl.paused) startPreview(); else stopPreview();
-});
+/* ======= UIイベントバインディング ======= */
+playPreviewBtn.addEventListener("click", ()=>{ if (!videoEl.src || !currentFile) { alert("先に動画を選択してください"); return; } if (skipSilenceCheckbox.checked && soundSegments.length===0) { alert("解析結果がありません。"); return; } if (videoEl.paused) startPreview(); else stopPreview(); });
 videoEl.addEventListener("play", ()=> playPreviewBtn.textContent = "停止");
 videoEl.addEventListener("pause", ()=> playPreviewBtn.textContent = "プレビュー再生");
 videoEl.addEventListener("ended", ()=> stopPreview());
-
-function startPreview(){
-  videoEl.play();
-  if (skipSilenceCheckbox.checked) setupAutoSkip();
-}
-function stopPreview(){
-  videoEl.pause();
-  removeAutoSkip();
-}
-function setupAutoSkip() {
-  removeAutoSkip();
-  let idx = findSegmentIndexAtTime(videoEl.currentTime);
-  if (idx < 0) { // 現在地がどのセグメントにもなければ、次のセグメントから再生
-      idx = soundSegments.findIndex(s => s.start > videoEl.currentTime);
-      if(idx < 0) idx = 0; // 見つからなければ最初から
-  }
-  if (!soundSegments[idx]) return;
-
-  const jumpToSegment = (index) => {
-    if (soundSegments[index]) {
-      videoEl.currentTime = soundSegments[index].start + 0.01;
-    } else {
-      stopPreview();
-    }
-  };
-
-  if(isTimeInSilence(videoEl.currentTime) || videoEl.currentTime < soundSegments[idx].start) {
-    jumpToSegment(idx);
-  }
-
-  autoSeekHandler = () => {
-    if(!soundSegments[idx]) { stopPreview(); return; }
-    if (videoEl.currentTime >= soundSegments[idx].end - 0.1) {
-      idx++;
-      jumpToSegment(idx);
-    }
-  };
-  videoEl.addEventListener("timeupdate", autoSeekHandler);
-}
-function removeAutoSkip(){
-  if (autoSeekHandler) videoEl.removeEventListener("timeupdate", autoSeekHandler);
-  autoSeekHandler = null;
-}
-function isTimeInSilence(t) { return silenceSegments.some(s => t >= s.start && t < s.end); }
-function findSegmentIndexAtTime(t) { return soundSegments.findIndex(s => t >= s.start && t < s.end); }
-
-/* ======= クリア ======= */
-function clearAll(){
-  stopPreview();
-  currentFile = null; audioBufferGlobal = null; lastRmsDbArray = null;
-  soundSegments = []; silenceSegments = [];
-  filenameEl.textContent = "ファイル未選択";
-  filemetaEl.textContent = "";
-  silenceList.textContent = "—";
-  soundList.textContent = "—";
-  if (videoEl.src) {
-    URL.revokeObjectURL(videoEl.src);
-    videoEl.removeAttribute("src");
-    videoEl.load();
-  }
-  const ctx = histogram.getContext("2d");
-  if(ctx) ctx.clearRect(0,0,histogram.width,histogram.height);
-  progressBar.style.width = "0%";
-  statusText.textContent = "待機中";
-  controlsEl.classList.add("disabled");
-  analyzeBtn.disabled = true;
-  log("クリアしました");
-}
-
-/* ======= UI イベントバインディング ======= */
-analyzeBtn.addEventListener("click", ()=> {
-  analyze().catch(err=>{ 
-      console.error(err); analyzeSpinner.hidden=true; analyzeBtn.disabled=false; 
-      controlsEl.classList.remove("disabled");
-      statusText.textContent='エラー'; log('解析中にエラー', err.message||err); 
-  });
-});
+skipSilenceCheckbox.addEventListener("change", (e)=>{ if (!videoEl.paused) e.target.checked ? setupAutoSkip() : removeAutoSkip(); });
+analyzeBtn.addEventListener("click", ()=> analyze().catch(err => { console.error(err); analyzeSpinner.hidden=true; analyzeBtn.disabled=false; controlsEl.classList.remove("disabled"); statusText.textContent='エラー'; log('解析中にエラー', err.message||err); }));
 clearBtn.addEventListener("click", ()=> clearAll());
-skipSilenceCheckbox.addEventListener("change", (e)=>{
-  if (videoEl.paused) return;
-  if (e.target.checked) setupAutoSkip(); else removeAutoSkip();
-});
-
-/* 終了時クリーンアップ */
 window.addEventListener("unload", ()=> { worker && worker.terminate(); });
 
-/* 初期ログ */
 log("Ready. ファイルをドロップするか「ファイルを選択」を押してください。");
 </script>
 </body>
