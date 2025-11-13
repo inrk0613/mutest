@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Silent Clipper | AI-Powered Video Silence Remover</title>
 
-    <!-- FFmpeg.wasm Scripts -->
+    <!-- 【重要】COOP/COEP不要版のライブラリに差し替え -->
     <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/ffmpeg.min.js"></script>
     <script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/util.min.js"></script>
 
@@ -164,13 +164,11 @@
     const histogramCtx = dom.histogramCanvas.getContext('2d');
 
     // --- WEB WORKER ---
-    // 【重要】ここのロジックを修正。解析と結果送信を1つのメッセージにまとめ、データ送信の順序問題を解決。
     const workerCode = `
         self.onmessage = async (e) => {
             const { type, payload } = e.data;
             if (type !== 'ANALYZE') return;
 
-            // 1. Calculate volumes for each chunk
             const { audioData, sampleRate, params } = payload;
             const chunkSamples = Math.floor(sampleRate * (params.chunkSize / 1000));
             const numChunks = Math.floor(audioData.length / chunkSamples);
@@ -179,66 +177,39 @@
                 let sumOfSquares = 0;
                 const start = i * chunkSamples;
                 const end = start + chunkSamples;
-                for (let j = start; j < end; j++) {
-                    sumOfSquares += audioData[j] * audioData[j];
-                }
+                for (let j = start; j < end; j++) { sumOfSquares += audioData[j] * audioData[j]; }
                 const rms = Math.sqrt(sumOfSquares / chunkSamples);
                 volumes[i] = (rms > 0) ? 20 * Math.log10(rms) : -144;
             }
 
-            // 2. Find sound zones based on volumes and parameters
             const chunkSizeSeconds = params.chunkSize / 1000;
             const paddingSeconds = params.padding / 1000;
-            let soundZones = [];
-            let startOfSound = -1;
-
-            for (let i = 0; i < volumes.length; i++) {
-                if (volumes[i] >= params.threshold && startOfSound === -1) {
-                    startOfSound = i * chunkSizeSeconds;
-                } else if (volumes[i] < params.threshold && startOfSound !== -1) {
-                    const endOfSound = i * chunkSizeSeconds;
-                    const silenceDuration = (endOfSound - (startOfSound)) * 1000;
-                    if (silenceDuration > params.minSilenceDuration) { //簡易的な判定ロジック
-                         soundZones.push({ start: startOfSound, end: endOfSound });
+            const minSilenceChunks = Math.ceil(params.minSilenceDuration / params.chunkSize);
+            
+            const soundZones = [];
+            let lastSoundChunk = -1;
+            for(let i=0; i < volumes.length; i++) {
+                if(volumes[i] >= params.threshold) {
+                    if (lastSoundChunk === -1) { // Start of a new sound zone
+                         soundZones.push({ start: i * chunkSizeSeconds, end: (i + 1) * chunkSizeSeconds });
+                    } else if ((i - lastSoundChunk) * params.chunkSize < params.minSilenceDuration) { // Merge with previous zone
+                        soundZones[soundZones.length - 1].end = (i + 1) * chunkSizeSeconds;
+                    } else { // New zone after a long silence
+                         soundZones.push({ start: i * chunkSizeSeconds, end: (i + 1) * chunkSizeSeconds });
                     }
-                    startOfSound = -1;
+                    lastSoundChunk = i;
                 }
             }
-             if (startOfSound !== -1) {
-                soundZones.push({ start: startOfSound, end: volumes.length * chunkSizeSeconds });
-            }
 
-            // A more robust merging algorithm
-            const mergedZones = [];
-            if(soundZones.length > 0){
-                let currentZone = { ...soundZones[0] };
-                for(let i=1; i < soundZones.length; i++){
-                    const nextZone = soundZones[i];
-                    const silenceBetween = (nextZone.start - currentZone.end) * 1000;
-                    if(silenceBetween < params.minSilenceDuration){
-                        currentZone.end = nextZone.end; // Merge
-                    } else {
-                        mergedZones.push(currentZone);
-                        currentZone = { ...nextZone };
-                    }
-                }
-                mergedZones.push(currentZone);
-            }
-
-            const paddedZones = mergedZones.map(zone => ({
+            const paddedZones = soundZones.map(zone => ({
                 start: Math.max(0, zone.start - paddingSeconds),
                 end: zone.end + paddingSeconds
             }));
             
-            // 3. Send all results back in one message
             self.postMessage({
                 type: 'ANALYSIS_COMPLETE',
-                payload: {
-                    soundZones: paddedZones,
-                    volumes: volumes,
-                    audioDataBuffer: audioData.buffer
-                }
-            }, [audioData.buffer]); // Transfer buffer back
+                payload: { soundZones: paddedZones, volumes: volumes, audioDataBuffer: audioData.buffer }
+            }, [audioData.buffer]);
         };
     `;
     const worker = new Worker(URL.createObjectURL(new Blob([workerCode], { type: 'application/javascript' })));
@@ -257,17 +228,21 @@
             }
         });
         setProcessingState(true, 'コアエンジンをロード中...');
-        const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
+        
+        // 【重要】COOP/COEP問題を回避するため、-mt (multi-thread) 版のコアをロードする
+        const baseURL = "https://unpkg.com/@ffmpeg/core-mt@0.12.6/dist/esm";
         await ffmpeg.load({
             coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
             wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
         });
+        
         setProcessingState(false);
     }
     
     // --- MAIN LOGIC ---
     async function handleFileSelect(file) {
         if (!file) return;
+        resetUI(); // Start with a clean state
         state.videoFile = file;
         setProcessingState(true, 'ファイルを準備中...');
         if (state.videoObjectURL) URL.revokeObjectURL(state.videoObjectURL);
@@ -326,13 +301,14 @@
         dom.fileDropZone.classList.remove('hidden');
         dom.videoWrapper.style.display = 'none';
         dom.histogramCanvas.style.display = 'none';
+        dom.fileInput.value = ''; // Reset file input
         if (state.videoObjectURL) URL.revokeObjectURL(state.videoObjectURL);
         Object.assign(state, { videoFile: null, videoObjectURL: null, audioData: null, soundZones: [], isProcessing: false });
         setProcessingState(false);
     }
     
     function drawHistogram(volumes) {
-        dom.histogramCanvas.style.display = 'block'; // 【重要】解析完了後に表示
+        dom.histogramCanvas.style.display = 'block';
         const { width, height } = dom.histogramCanvas;
         histogramCtx.clearRect(0, 0, width, height);
         const barWidth = width / volumes.length;
@@ -354,7 +330,7 @@
         if (state.soundZones.length === 0 || dom.videoPlayer.paused || dom.videoPlayer.seeking) return;
         const currentTime = dom.videoPlayer.currentTime;
         const currentZone = state.soundZones[state.currentSoundZoneIndex];
-        if (!currentZone || currentTime < currentZone.start) return; // seeking対策
+        if (!currentZone || currentTime < currentZone.start) return;
         if (currentTime >= currentZone.end) {
             const nextZoneIndex = state.currentSoundZoneIndex + 1;
             if (nextZoneIndex < state.soundZones.length) {
@@ -363,14 +339,14 @@
                 dom.videoPlayer.play();
             } else {
                 dom.videoPlayer.pause();
-                state.currentSoundZoneIndex = 0; // ループしない
+                state.currentSoundZoneIndex = 0;
             }
         }
     }
 
     async function exportVideo() {
         if (!state.videoFile || state.soundZones.length === 0) {
-            alert('書き出すデータがありません。先にファイルを解析してください。'); return;
+            alert('書き出すデータがありません。'); return;
         }
         setProcessingState(true, "書き出しの準備中...");
         dom.exportProgress.classList.remove('hidden');
@@ -407,18 +383,17 @@
     dom.fileDropZone.addEventListener('dragleave', () => dom.fileDropZone.classList.remove('dragover'));
     dom.fileDropZone.addEventListener('drop', (e) => { e.preventDefault(); dom.fileDropZone.classList.remove('dragover'); handleFileSelect(e.dataTransfer.files[0]); });
     
-    // 【重要】onmessageのロジックを修正。解析結果を一度に受け取り、UIに反映。
     worker.onmessage = (e) => {
         const { type, payload } = e.data;
         if (type === 'ANALYSIS_COMPLETE') {
-            state.audioData = new Float32Array(payload.audioDataBuffer); // 音声データを復元
+            state.audioData = new Float32Array(payload.audioDataBuffer);
             state.soundZones = payload.soundZones;
-            drawHistogram(payload.volumes); // 波形を描画
+            drawHistogram(payload.volumes);
             setProcessingState(false);
             if (state.soundZones.length > 0) {
                 dom.videoPlayer.currentTime = state.soundZones[0].start;
                 state.currentSoundZoneIndex = 0;
-                dom.videoPlayer.play(); // 解析完了後、自動再生開始
+                dom.videoPlayer.play();
             } else {
                 alert('解析の結果、音声区間が見つかりませんでした。');
             }
