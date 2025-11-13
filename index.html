@@ -24,18 +24,22 @@
   .dropzone{border:2px dashed rgba(255,255,255,0.04);padding:20px;border-radius:10px;text-align:center;cursor:pointer}
   .dropzone.dragover{border-color:rgba(14,165,164,0.8);box-shadow:0 6px 24px rgba(14,165,164,0.06)}
   input[type=file]{display:none}
-  .controls{display:flex;flex-direction:column;gap:12px}
+  .controls{display:flex;flex-direction:column;gap:12px;transition: opacity 0.3s ease}
+  .controls.disabled{opacity:0.4;pointer-events:none}
   label.range{display:flex;flex-direction:column;gap:6px}
   .rangeRow{display:flex;gap:12px;align-items:center}
   .rangeRow input[type=range]{flex:1}
   .val{min-width:72px;text-align:right;color:var(--muted);font-size:13px}
   canvas.hist{width:100%;height:120px;border-radius:8px;background:var(--glass);display:block}
   .progress{height:8px;background:rgba(255,255,255,0.04);border-radius:999px;overflow:hidden}
-  .progress > i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),#60a5fa)}
+  .progress > i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),#60a5fa);transition: width 0.4s ease}
   .small{font-size:12px;color:var(--muted)}
   .muted{color:var(--muted)}
-  .btn{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:10px;background:linear-gradient(90deg,var(--accent),#60a5fa);color:#012;cursor:pointer;border:none;font-weight:700}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:10px;background:linear-gradient(90deg,var(--accent),#60a5fa);color:#012;cursor:pointer;border:none;font-weight:700;transition: all 0.2s ease}
+  .btn:disabled{cursor:not-allowed;filter:grayscale(60%);opacity:0.7}
   .outline{background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted)}
+  .outline:hover:not(:disabled){background:rgba(255,255,255,0.03)}
+  .btn:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 12px rgba(14,165,164,0.1)}
   .list{max-height:200px;overflow:auto;padding:8px;border-radius:8px;background:rgba(255,255,255,0.01)}
   .meta{display:flex;justify-content:space-between;align-items:center;gap:12px}
   .spinner{width:28px;height:28px;border-radius:50%;border:3px solid rgba(255,255,255,0.08);border-top-color:var(--accent);animation:spin 1s linear infinite}
@@ -74,7 +78,7 @@
         <div id="statusText" class="small muted">待機中</div>
       </div>
 
-      <div style="margin-top:14px" class="controls">
+      <div style="margin-top:14px" class="controls disabled" id="controls">
         <label class="range">
           <div class="rangeRow"><div>Threshold (dB)</div><div class="val" id="thVal">-50 dB</div></div>
           <input id="threshold" type="range" min="-80" max="-12" step="1" value="-50">
@@ -101,7 +105,7 @@
         </div>
 
         <div style="display:flex;gap:10px;align-items:center;margin-top:6px">
-          <button id="analyzeBtn" class="btn">解析を実行</button>
+          <button id="analyzeBtn" class="btn" disabled>解析を実行</button>
           <button id="clearBtn" class="outline btn">クリア</button>
           <div style="margin-left:auto" id="analyzeSpinner" hidden><div class="spinner" aria-hidden="true"></div></div>
         </div>
@@ -145,10 +149,12 @@
  * Silence Cutter — main (TypeScript-style JSDoc, transpiled JS for browser)
  *
  * 実装ノート:
- * - 音声データのデコードは AudioContext.decodeAudioData（非同期）で行い、
- *   Float32Array を WebWorker に transfer して解析（RMS/dB計算、チャンク処理）。
+ * - [修正] 動画ファイルのオーディオデコードは、decodeAudioData の直接使用を廃止。
+ *   代わりに OfflineAudioContext と MediaElementAudioSourceNode を使用し、
+ *   ブラウザの動画デコード能力を活用して堅牢にオーディオトラックを抽出する方式に変更。
+ * - Float32Array を WebWorker に transfer して解析（RMS/dB計算、チャンク処理）するコアロジックは維持。
  * - Worker はチャンクごとの RMS を計算して dB 配列を返す。メインスレッドはヒストグラム描画と無音区間の生成を担当。
- * - プレビューは precomputed の soundSegments を使って timeupdate でシークすることで無音をスキップ（極力シームレス）。
+ * - プレビューは precomputed の soundSegments を使って timeupdate でシークすることで無音をスキップ。
  *
  * 注: 厳密なWASM最適化は今回は未実装。Worker内の処理は TypedArray を使い最小コピーで高速化しています。
  */
@@ -178,6 +184,7 @@ const fileInput = document.getElementById("fileInput");
 const pickBtn = document.getElementById("pickBtn");
 const analyzeBtn = document.getElementById("analyzeBtn");
 const clearBtn = document.getElementById("clearBtn");
+const controlsEl = document.getElementById("controls");
 const analyzeSpinner = document.getElementById("analyzeSpinner");
 const statusText = document.getElementById("statusText");
 const progressBar = document.getElementById("progressBar");
@@ -244,46 +251,38 @@ let worker = null;
 let lastRmsDbArray = null;
 let soundSegments = []; // [{start,end}]
 let silenceSegments = []; // [{start,end}]
-let analyzing = false;
 let autoSeekHandler = null;
 
 /* ======= Worker 作成（Blob URL を使う - 単一ファイルに収めるため） ======= */
 function createWorker() {
-  // Worker スクリプト（ES6）を文字列で作成
   const workerCode = `
   self.onmessage = function(ev) {
     const msg = ev.data;
     if (msg.cmd === 'analyze') {
       const { channelData, sampleRate, chunkMs } = msg;
-      // channelData: Array of ArrayBuffer (Float32Array.buffer for each channel)
       const channels = channelData.map(b => new Float32Array(b));
       const length = channels[0].length;
       const framesPerChunk = Math.max(1, Math.floor(sampleRate * (chunkMs/1000)));
       const nChunks = Math.ceil(length / framesPerChunk);
       const rmsDb = new Float32Array(nChunks);
-      // for efficiency, precompute channel count
       const chCount = channels.length;
       for (let cIdx = 0; cIdx < nChunks; cIdx++) {
         const start = cIdx * framesPerChunk;
         const end = Math.min(length, start + framesPerChunk);
         let sumSq = 0.0;
         let samples = 0;
-        // sum across channels
         for (let ch = 0; ch < chCount; ch++){
           const chArr = channels[ch];
           for (let i = start; i < end; i++){
             const s = chArr[i];
             sumSq += s * s;
-            samples++;
           }
         }
-        // compute RMS
+        samples = (end - start) * chCount;
         const meanSq = samples > 0 ? (sumSq / samples) : 0;
         const rms = Math.sqrt(meanSq);
-        // convert to dBFS (reference 1.0)
         const db = rms > 0 ? (20 * Math.log10(rms)) : -200.0;
         rmsDb[cIdx] = db;
-        // progress notification every 256 chunks
         if ((cIdx & 255) === 0) {
           self.postMessage({ type: 'progress', progress: cIdx / nChunks });
         }
@@ -302,85 +301,115 @@ async function handleFile(file) {
   clearAll();
   currentFile = file;
   filenameEl.textContent = file.name;
-  filemetaEl.textContent = `${(file.size/1024/1024).toFixed(2)} MB`;
+  filemetaEl.textContent = `${(file.size / 1024 / 1024).toFixed(2)} MB`;
   log("ファイル選択:", file.name);
-  // video 要素にオブジェクトURLセット（プレビュー用）
+
+  controlsEl.classList.add("disabled");
+  analyzeBtn.disabled = true;
+  analyzeSpinner.hidden = false;
+  statusText.textContent = "動画ファイルを準備中...";
+  progressBar.style.width = "5%";
+
   const url = URL.createObjectURL(file);
   videoEl.src = url;
 
-  // decode audio
   try {
-    statusText.textContent = "デコード中...";
-    analyzing = true;
-    analyzeSpinner.hidden = false;
-    progressBar.style.width = "6%";
-    // read as ArrayBuffer
-    const ab = await file.arrayBuffer();
-    // create AudioContext and decode
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const decoded = await audioCtx.decodeAudioData(ab.slice(0)); // async
-    audioBufferGlobal = decoded;
-    sampleRate = decoded.sampleRate;
-    log("デコード完了. duration:", decoded.duration.toFixed(2), "s, sampleRate:", decoded.sampleRate);
+    await new Promise((resolve, reject) => {
+      videoEl.onloadedmetadata = resolve;
+      videoEl.onerror = () => reject(new Error("動画ファイルの読み込みに失敗しました。対応していないフォーマットの可能性があります。"));
+    });
+
+    const duration = videoEl.duration;
+    if (!isFinite(duration) || duration === 0) {
+      throw new Error("動画の長さ(duration)が取得できませんでした。");
+    }
+
+    log("メタデータ読み込み完了. duration:", duration.toFixed(2), "s");
+    statusText.textContent = "音声データを抽出中...";
+    progressBar.style.width = "10%";
+
+    // OfflineAudioContext を使用して動画から AudioBuffer を抽出
+    const audioCtxForExtract = new (window.AudioContext || window.webkitAudioContext)();
+    // 一般的な動画は48kHzのサンプルレートが多いため、これを採用
+    const targetSampleRate = 48000;
+    const offlineCtx = new OfflineAudioContext(
+      2, // ステレオで処理
+      Math.ceil(duration * targetSampleRate),
+      targetSampleRate
+    );
+
+    const source = audioCtxForExtract.createMediaElementSource(videoEl);
+    source.connect(offlineCtx.destination);
+
+    const renderedBuffer = await offlineCtx.startRendering();
+    audioBufferGlobal = renderedBuffer;
+    sampleRate = renderedBuffer.sampleRate;
+    
+    // クリーンアップ
+    source.disconnect();
+    audioCtxForExtract.close();
+
+    log("音声抽出完了. SampleRate:", sampleRate, "Hz");
     statusText.textContent = "解析準備完了";
-    progressBar.style.width = "12%";
-    analyzing = false;
-    analyzeSpinner.hidden = true;
+    progressBar.style.width = "15%";
+    controlsEl.classList.remove("disabled");
+    analyzeBtn.disabled = false;
+
   } catch (err) {
     console.error(err);
-    statusText.textContent = "デコード失敗";
-    analyzeSpinner.hidden = true;
-    log("エラー: デコードに失敗しました。対応フォーマットか確認してください。", err.message || err);
+    statusText.textContent = "音声抽出に失敗";
+    progressBar.style.width = "0%";
+    log("エラー:", err.message || "動画から音声の抽出に失敗しました。");
     return;
+  } finally {
+    analyzeSpinner.hidden = true;
   }
 }
 
+
 /* ======= 解析実行 ======= */
 async function analyze() {
-  if (!audioBufferGlobal) { alert("先に動画を選択してください"); return; }
-  // UI 状態
+  if (!audioBufferGlobal) { alert("先に動画を選択し、音声データの準備が完了するまでお待ちください。"); return; }
+  
   analyzeBtn.disabled = true; clearBtn.disabled = true; analyzeSpinner.hidden = false;
+  controlsEl.classList.add("disabled");
   statusText.textContent = "解析中...";
   progressBar.style.width = "20%";
   log("解析開始");
 
-  // パラメータ
   const thresholdDb = Number(thresholdEl.value);
   const chunkMs = Number(chunkEl.value);
   const minSilenceMs = Number(minSilenceEl.value);
   const paddingMs = Number(paddingEl.value);
 
-  // prepare channel data (transferable)
-  const chCount = audioBufferGlobal.numberOfChannels || 1;
+  const chCount = audioBufferGlobal.numberOfChannels;
   const channelData = [];
-  for (let c=0;c<chCount;c++){
-    // copy to Float32Array to ensure contiguous buffer
+  for (let c=0; c<chCount; c++){
     const arr = audioBufferGlobal.getChannelData(c);
-    // create a copy (Float32Array) to be transferable
     const copy = new Float32Array(arr.length);
     copy.set(arr);
     channelData.push(copy.buffer);
   }
 
-  // create worker and send data
   worker && worker.terminate();
   worker = createWorker();
   worker.onmessage = function(ev) {
     const msg = ev.data;
     if (msg.type === 'progress') {
-      const p = Math.min(0.95, 0.2 + msg.progress*0.75);
-      progressBar.style.width = (p*100)+"%";
-      statusText.textContent = `解析中... ${(p*100).toFixed(0)}%`;
+      const p = Math.min(0.95, 0.2 + msg.progress * 0.75);
+      progressBar.style.width = (p * 100) + "%";
+      statusText.textContent = `解析中... ${(p * 100).toFixed(0)}%`;
     } else if (msg.type === 'done') {
       progressBar.style.width = "100%";
       statusText.textContent = "解析完了";
       analyzeSpinner.hidden = true;
       analyzeBtn.disabled = false; clearBtn.disabled = false;
-      // msg.rmsDb is transferred ArrayBuffer
+      controlsEl.classList.remove("disabled");
+      
       const dbArr = new Float32Array(msg.rmsDb);
       lastRmsDbArray = dbArr;
       log("RMS->dB チャンク数:", dbArr.length);
-      // post-process to produce silence/sound segments
+      
       const {soundSegs, silenceSegs} = generateSegmentsFromDbArray(dbArr, {
         chunkMs, thresholdDb, minSilenceMs, paddingMs, totalDuration: audioBufferGlobal.duration
       });
@@ -392,27 +421,20 @@ async function analyze() {
     }
   };
 
-  // send heavy data with transfer to worker
   worker.postMessage({ cmd:'analyze', channelData, sampleRate, chunkMs }, channelData);
 }
 
 /* ======= DB配列 -> セグメント生成ロジック ======= */
-/**
- * @param {Float32Array} dbArr
- * @param {Object} opts
- * @returns {{soundSegs:Array, silenceSegs:Array}}
- */
 function generateSegmentsFromDbArray(dbArr, opts) {
   const { chunkMs, thresholdDb, minSilenceMs, paddingMs, totalDuration } = opts;
   const n = dbArr.length;
-  // bool array: isSilent
   const isSilent = new Uint8Array(n);
   for (let i=0;i<n;i++){
     isSilent[i] = dbArr[i] < thresholdDb ? 1 : 0;
   }
-  // merge contiguous silent chunks to intervals (in ms)
+  
   const chunksToMs = (i) => i * chunkMs;
-  const silenceIntervals = [];
+  const silenceIntervalsRaw = [];
   let i=0;
   while (i < n) {
     if (isSilent[i]) {
@@ -421,16 +443,17 @@ function generateSegmentsFromDbArray(dbArr, opts) {
       const endChunk = i-1;
       const startMs = startChunk * chunkMs;
       const endMs = (endChunk+1) * chunkMs;
-      const dur = endMs - startMs;
-      if (dur >= minSilenceMs) {
-        // apply padding
-        const s = Math.max(0, (startMs - paddingMs)/1000);
-        const e = Math.min(totalDuration, (endMs + paddingMs)/1000);
-        silenceIntervals.push({start:s, end:e});
+      if ((endMs - startMs) >= minSilenceMs) {
+        silenceIntervalsRaw.push({start: startMs, end: endMs});
       }
     } else i++;
   }
-  // now compute sound intervals as complement
+  
+  const silenceIntervals = silenceIntervalsRaw.map(interval => ({
+    start: Math.max(0, (interval.start - paddingMs) / 1000),
+    end: Math.min(totalDuration, (interval.end + paddingMs) / 1000)
+  }));
+
   const soundIntervals = [];
   let cur = 0.0;
   silenceIntervals.sort((a,b)=>a.start-b.start);
@@ -441,7 +464,7 @@ function generateSegmentsFromDbArray(dbArr, opts) {
     cur = Math.max(cur, sil.end);
   }
   if (cur < totalDuration) soundIntervals.push({start:cur, end: totalDuration});
-  return { soundSegs: soundIntervals, silenceSegs: silenceIntervals };
+  return { soundSegs: soundIntervals.filter(s => s.end - s.start > 0.01), silenceSegs: silenceIntervals };
 }
 
 /* ======= ヒストグラム描画 ======= */
@@ -451,31 +474,33 @@ function drawHistogram(dbArr) {
   canvas.width = canvas.clientWidth * dpr;
   canvas.height = canvas.clientHeight * dpr;
   const ctx = canvas.getContext("2d");
+  if (!ctx) return;
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  // bucketize
+
   const buckets = 60;
   const minDb = -100, maxDb = 0;
   const counts = new Uint32Array(buckets);
-  for (let i=0;i<dbArr.length;i++){
-    const v = Math.max(minDb, Math.min(maxDb, dbArr[i]));
-    const idx = Math.floor(((v - minDb) / (maxDb - minDb)) * (buckets-1));
-    counts[idx]++;
+  for (const v of dbArr) {
+    if (v > minDb) { // -Infinity は除外
+        const idx = Math.floor(((Math.min(maxDb, v) - minDb) / (maxDb - minDb)) * (buckets-1));
+        counts[idx]++;
+    }
   }
-  const maxC = Math.max(1, Math.max(...counts));
-  // draw bars
+  const maxC = Math.max(1, ...counts);
   const w = canvas.width, h = canvas.height;
   const barW = w / buckets;
+  ctx.fillStyle = "rgba(14, 165, 164, 0.4)";
   for (let b=0;b<buckets;b++){
-    const c = counts[b];
-    const hh = (c / maxC) * (h*0.9);
-    ctx.fillStyle = "rgba(255,255,255,0.08)";
-    ctx.fillRect(b*barW, h-hh, Math.max(1,barW-1), hh);
+    const hh = (counts[b] / maxC) * h;
+    ctx.fillRect(b*barW, h-hh, Math.max(1, barW * 0.85), hh);
   }
-  // axis labels
-  ctx.fillStyle = "rgba(255,255,255,0.12)";
-  ctx.font = `${12*dpr}px system-ui`;
-  ctx.fillText(`${Math.round(-100)} dB`, 4*dpr, 14*dpr);
-  ctx.fillText(`${Math.round(0)} dB`, w - 28*dpr, 14*dpr);
+  
+  ctx.fillStyle = "rgba(255,255,255,0.4)";
+  ctx.font = `${10*dpr}px var(--font-sans)`;
+  ctx.textAlign = "left";
+  ctx.fillText(`${minDb} dB`, 4*dpr, 12*dpr);
+  ctx.textAlign = "right";
+  ctx.fillText(`${maxDb} dB`, w - 4*dpr, 12*dpr);
 }
 
 /* ======= セグメント表示 ======= */
@@ -494,32 +519,30 @@ function renderSegments() {
 
 /* ======= プレビュー（無音スキップ） ======= */
 playPreviewBtn.addEventListener("click", ()=>{
-  if (!videoEl.src) { alert("先に動画を選択してください"); return; }
+  if (!videoEl.src || !currentFile) { alert("先に動画を選択してください"); return; }
   if (skipSilenceCheckbox.checked && soundSegments.length===0) {
-    alert("解析結果がありません。先に解析を実行してください（左側の解析ボタン）。");
+    alert("解析結果がありません。先に解析を実行してください。");
     return;
   }
-  // toggle play/pause
   if (videoEl.paused) {
-    // start from first sound segment or from current time
     startPreview();
   } else {
     stopPreview();
   }
 });
+videoEl.addEventListener("play", ()=> playPreviewBtn.textContent = "停止");
+videoEl.addEventListener("pause", ()=> playPreviewBtn.textContent = "プレビュー再生");
+videoEl.addEventListener("ended", ()=> stopPreview());
+
 
 function startPreview(){
-  playPreviewBtn.textContent = "停止";
   videoEl.play();
   if (skipSilenceCheckbox.checked) {
     setupAutoSkip();
-  } else {
-    removeAutoSkip();
   }
 }
 
 function stopPreview(){
-  playPreviewBtn.textContent = "プレビュー再生";
   videoEl.pause();
   removeAutoSkip();
 }
@@ -528,22 +551,26 @@ function setupAutoSkip() {
   removeAutoSkip();
   let idx = findSegmentIndexAtTime(videoEl.currentTime);
   if (idx < 0) idx = 0;
-  // if current time is inside silence, jump to next sound
-  if (idx >= soundSegments.length) { videoEl.currentTime = soundSegments.length?soundSegments[soundSegments.length-1].start:0; return; }
-  // ensure we start inside a sound segment
-  if (videoEl.currentTime < soundSegments[idx].start) videoEl.currentTime = soundSegments[idx].start + 0.001;
+  if (idx >= soundSegments.length) {
+      if (soundSegments.length > 0) {
+        videoEl.currentTime = soundSegments[0].start + 0.01;
+      }
+      return;
+  }
+  if (videoEl.currentTime < soundSegments[idx].start || isTimeInSilence(videoEl.currentTime)) {
+    videoEl.currentTime = soundSegments[idx].start + 0.01;
+  }
   autoSeekHandler = function () {
     const t = videoEl.currentTime;
     const seg = soundSegments[idx];
-    if (!seg) return;
-    // if beyond this segment, advance
-    if (t >= seg.end - 0.05) {
+    if (!seg) { stopPreview(); return; }
+
+    if (t >= seg.end - 0.1) {
       idx++;
       if (idx >= soundSegments.length) {
-        // end
         stopPreview();
       } else {
-        videoEl.currentTime = Math.max(soundSegments[idx].start + 0.001, soundSegments[idx].start);
+        videoEl.currentTime = soundSegments[idx].start + 0.01;
       }
     }
   };
@@ -557,35 +584,59 @@ function removeAutoSkip(){
   }
 }
 
-/** 現在時刻が入っている sound segment の index を返す（ない場合は -1） */
+function isTimeInSilence(t) {
+    return silenceSegments.some(s => t >= s.start && t < s.end);
+}
+
 function findSegmentIndexAtTime(t) {
   for (let i=0;i<soundSegments.length;i++){
     const s = soundSegments[i];
     if (t >= s.start && t < s.end) return i;
-    if (t < s.start) return i; // next segment index
+    if (t < s.start) return i;
   }
-  return soundSegments.length;
+  return -1; // Not found
 }
 
 /* ======= クリア ======= */
 function clearAll(){
+  stopPreview();
   currentFile = null; audioBufferGlobal = null; lastRmsDbArray = null;
   soundSegments = []; silenceSegments = [];
   filenameEl.textContent = "ファイル未選択";
   filemetaEl.textContent = "";
   silenceList.textContent = "—";
   soundList.textContent = "—";
-  videoEl.removeAttribute("src"); videoEl.load();
+  if (videoEl.src) {
+    URL.revokeObjectURL(videoEl.src);
+    videoEl.removeAttribute("src");
+    videoEl.load();
+  }
+  const ctx = histogram.getContext("2d");
+  if(ctx) ctx.clearRect(0,0,histogram.width,histogram.height);
   progressBar.style.width = "0%";
   statusText.textContent = "待機中";
+  controlsEl.classList.add("disabled");
+  analyzeBtn.disabled = true;
   log("クリアしました");
 }
 
 /* ======= UI イベントバインディング ======= */
 analyzeBtn.addEventListener("click", ()=> {
-  analyze().catch(err=>{ console.error(err); analyzeSpinner.hidden=true; analyzeBtn.disabled=false; statusText.textContent='エラー'; log('解析中にエラー', err.message||err); });
+  analyze().catch(err=>{ 
+      console.error(err); 
+      analyzeSpinner.hidden=true; 
+      analyzeBtn.disabled=false; 
+      controlsEl.classList.remove("disabled");
+      statusText.textContent='エラー'; 
+      log('解析中にエラー', err.message||err); 
+  });
 });
 clearBtn.addEventListener("click", ()=> clearAll());
+skipSilenceCheckbox.addEventListener("change", (e)=>{
+  if (videoEl.paused) return;
+  if (e.target.checked) setupAutoSkip();
+  else removeAutoSkip();
+});
 
 /* 終了時クリーンアップ */
 window.addEventListener("unload", ()=> {
