@@ -643,6 +643,101 @@
             }
         }
     }
+
+        // ===================================================================================
+// --- EXPORT LOGIC (FFmpeg.wasm) ---
+// ===================================================================================
+
+let ffmpeg; // FFmpegインスタンスを保持する変数
+
+async function loadFFmpeg() {
+    if (ffmpeg && ffmpeg.loaded) return;
+    
+    dom.exportProgress.classList.remove('hidden');
+    dom.exportProgressText.textContent = '書き出しエンジンをロード中...';
+    
+    ffmpeg = new FFmpeg.FFmpeg();
+    ffmpeg.on('log', ({ message }) => {
+        // FFmpegのログをコンソールに出力（デバッグに便利）
+        console.log(message);
+    });
+    ffmpeg.on('progress', ({ progress, time }) => {
+        const progressPercent = Math.round(progress * 100);
+        dom.exportProgressBar.value = progressPercent;
+        dom.exportProgressText.textContent = `処理中... ${progressPercent}%`;
+    });
+    
+    const baseURL = "https://unpkg.com/@ffmpeg/core@0.11.0/dist/";
+    await ffmpeg.load({
+        coreURL: await FFmpegUtil.toBlobURL(`${baseURL}ffmpeg-core.js`, "text/javascript"),
+        wasmURL: await FFmpegUtil.toBlobURL(`${baseURL}ffmpeg-core.wasm`, "application/wasm"),
+    });
+    
+    console.log('FFmpeg loaded.');
+}
+
+async function exportVideo() {
+    if (!state.videoFile || state.soundZones.length === 0) {
+        alert('書き出すデータがありません。先にファイルを解析してください。');
+        return;
+    }
+
+    dom.exportButton.disabled = true;
+    
+    try {
+        await loadFFmpeg();
+
+        dom.exportProgressText.textContent = 'ファイルをメモリに書き込み中...';
+        
+        // 1. ファイルをFFmpegの仮想ファイルシステムに書き込む
+        const { name } = state.videoFile;
+        const outputName = `clipped-${name}`;
+        await ffmpeg.writeFile(name, await FFmpegUtil.fetchFile(state.videoFile));
+        
+        // 2. FFmpegコマンドを生成する
+        // soundZonesから、動画のどの部分を残すかのフィルター文字列を生成
+        const filter_complex = state.soundZones
+            .map((zone, index) => `[0:v]trim=start=${zone.start}:end=${zone.end},setpts=PTS-STARTPTS[v${index}];` +
+                                 `[0:a]atrim=start=${zone.start}:end=${zone.end},asetpts=PTS-STARTPTS[a${index}];`)
+            .join('');
+        
+        const concat_filter = state.soundZones
+            .map((_, index) => `[v${index}][a${index}]`)
+            .join('') + `concat=n=${state.soundZones.length}:v=1:a=1[outv][outa]`;
+        
+        const command = [
+            '-i', name,
+            '-filter_complex', `${filter_complex}${concat_filter}`,
+            '-map', '[outv]',
+            '-map', '[outa]',
+            outputName
+        ];
+        
+        // 3. FFmpegコマンドを実行
+        await ffmpeg.exec(...command);
+        
+        // 4. 結果を読み込んでダウンロードさせる
+        dom.exportProgressText.textContent = 'ファイルを生成中...';
+        const data = await ffmpeg.readFile(outputName);
+        
+        const blob = new Blob([data.buffer], { type: 'video/mp4' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = outputName;
+        a.click();
+        
+        URL.revokeObjectURL(url);
+        
+        dom.exportProgress.classList.add('hidden');
+    } catch (error) {
+        console.error('書き出し中にエラーが発生しました:', error);
+        alert('動画の書き出しに失敗しました。');
+    } finally {
+        dom.exportButton.disabled = false;
+    }
+}
     
     // ===================================================================================
     // --- EVENT LISTENERS ---
