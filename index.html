@@ -267,6 +267,13 @@
             </div>
             <aside class="controls-panel" id="controlsPanel">
                 <h3>設定</h3>
+                <div class="export-section" style="margin-bottom: 1.5rem;">
+    <button id="exportButton" style="...">書き出し</button>
+    <div id="exportProgress" class="hidden" style="margin-top: 0.75rem;">
+        <p id="exportProgressText" style="font-size: 0.9rem; margin-bottom: 0.5rem;"></p>
+        <progress id="exportProgressBar" value="0" max="100" style="width: 100%;"></progress>
+    </div>
+</div>
                 <div class="control-group">
                     <label for="thresholdSlider">無音しきい値 <span class="value" id="thresholdValue">-40 dB</span></label>
                     <input type="range" min="-60" max="-20" value="-40" class="slider" id="thresholdSlider">
