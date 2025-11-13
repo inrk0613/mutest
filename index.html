@@ -3,591 +3,698 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Silent Cutter - The Art of Silence</title>
-    <meta name="description" content="Blazing-fast, beautiful, and private. Automatically cut silent parts from your videos, right in your browser.">
-    
-    <!-- Google Fonts: Inter -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-
+    <title>Silent Clipper | AI-Powered Video Silence Remover</title>
     <style>
-        /* --- Reset & Base Styles --- */
         :root {
-            --color-bg: #000000;
-            --color-surface: #121212;
-            --color-surface-2: #1e1e1e;
-            --color-primary: #007aff;
-            --color-primary-hover: #0088ff;
-            --color-text: #f5f5f7;
-            --color-text-secondary: #8a8a8e;
-            --color-border: #3a3a3c;
-            --font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            --transition-fast: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            --bg-color: #121212;
+            --surface-color: #1e1e1e;
+            --primary-color: #0A84FF;
+            --text-color: #e0e0e0;
+            --text-secondary-color: #888;
+            --border-color: #333;
+            --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            --border-radius: 12px;
+            --transition-speed: 0.3s;
         }
-        *, *::before, *::after { box-sizing: border-box; }
-        html { scroll-behavior: smooth; }
-        body {
-            font-family: var(--font-family);
-            background-color: var(--color-bg);
-            color: var(--color-text);
+
+        /* Reset and Base Styles */
+        * {
+            box-sizing: border-box;
             margin: 0;
-            padding: 1rem;
+            padding: 0;
+        }
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: var(--font-family);
             display: flex;
             justify-content: center;
-            align-items: flex-start;
-            min-height: 100vh;
+            align-items: center;
+            font-size: 16px;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
         }
-        #app {
+
+        /* Main Application Layout */
+        .app-container {
             width: 100%;
-            max-width: 1400px;
-            margin: auto;
+            max-width: 1200px;
+            height: 95vh;
+            max-height: 900px;
+            background-color: var(--surface-color);
+            border-radius: var(--border-radius);
+            box-shadow: 0 20px 50px rgba(0,0,0,0.3);
             display: flex;
             flex-direction: column;
-            gap: 2rem;
-            opacity: 0;
-            transform: translateY(20px);
-            animation: fadeIn 0.8s 0.2s ease-out forwards;
-        }
-        @keyframes fadeIn {
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-        
-        /* --- Layout --- */
-        .main-layout {
-            display: grid;
-            grid-template-columns: 300px 1fr;
-            grid-template-rows: auto 1fr;
-            gap: 2rem;
-            width: 100%;
-            display: none; /* Initially hidden */
-        }
-        .main-layout.visible {
-            display: grid;
-        }
-        .controls-panel { 
-            grid-row: 1 / 3;
-            background-color: var(--color-surface);
-            border-radius: 12px;
-            padding: 1.5rem;
-            border: 1px solid var(--color-border);
-        }
-        .video-wrapper {
-            grid-column: 2 / 3;
-            background-color: #000;
-            border-radius: 12px;
             overflow: hidden;
-            border: 1px solid var(--color-border);
         }
-        .timeline-wrapper {
-            grid-column: 2 / 3;
-            height: 100px;
+
+        /* Header */
+        header {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0;
+        }
+        header h1 {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        /* Main Content Area */
+        main {
+            display: flex;
+            flex-grow: 1;
+            height: 100%;
+            min-height: 0; /* Important for flexbox shrinking */
         }
         
-        /* --- Dropzone --- */
-        #dropzone {
-            border: 2px dashed var(--color-border);
-            border-radius: 16px;
-            padding: 4rem 2rem;
+        .video-panel {
+            flex-grow: 1;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+        }
+        .controls-panel {
+            width: 320px;
+            flex-shrink: 0;
+            border-left: 1px solid var(--border-color);
+            padding: 1.5rem;
+            overflow-y: auto;
+        }
+
+        /* File Drop Zone */
+        .file-drop-zone {
+            flex-grow: 1;
+            border: 2px dashed var(--border-color);
+            border-radius: var(--border-radius);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
             text-align: center;
             cursor: pointer;
-            transition: var(--transition-fast);
-            background-color: var(--color-surface);
+            transition: background-color var(--transition-speed), border-color var(--transition-speed);
         }
-        #dropzone.dragging {
-            border-color: var(--color-primary);
-            background-color: var(--color-surface-2);
+        .file-drop-zone.dragover {
+            background-color: rgba(10, 132, 255, 0.1);
+            border-color: var(--primary-color);
         }
-        #dropzone p {
-            margin: 0;
-            font-size: 1.2rem;
-            color: var(--color-text-secondary);
+        .file-drop-zone h2 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .file-drop-zone p {
+            color: var(--text-secondary-color);
+        }
+        #fileInput { display: none; }
+        
+        /* Video Player Area */
+        .video-wrapper {
+            position: relative;
+            width: 100%;
+            flex-grow: 1;
+            background-color: #000;
+            border-radius: var(--border-radius);
+            overflow: hidden;
+            display: none; /* Initially hidden */
+        }
+        #videoPlayer {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* Histogram */
+        #histogramCanvas {
+            width: 100%;
+            height: 80px;
+            margin-top: 1rem;
+            border-radius: 4px;
+            background-color: #2a2a2a;
+            cursor: crosshair;
         }
         
-        /* --- Controls --- */
-        .control-group { margin-bottom: 2rem; }
+        /* Loading Spinner */
+        .loader-overlay {
+            position: absolute;
+            inset: 0;
+            background-color: rgba(0,0,0,0.7);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+        }
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid var(--border-color);
+            border-top-color: var(--primary-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        #progressText {
+            margin-top: 1rem;
+            color: var(--text-color);
+            font-size: 0.9rem;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+
+        /* Controls Panel */
+        .controls-panel h3 {
+            font-size: 1.1rem;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.75rem;
+        }
+        .control-group {
+            margin-bottom: 1.5rem;
+        }
         .control-group label {
             display: flex;
             justify-content: space-between;
             margin-bottom: 0.75rem;
+            font-size: 0.9rem;
             font-weight: 500;
         }
-        .control-group .value { color: var(--color-text-secondary); }
-        input[type="range"] {
+        .control-group .value {
+            color: var(--text-secondary-color);
+            font-weight: 400;
+        }
+        .slider {
             -webkit-appearance: none;
-            appearance: none;
             width: 100%;
             height: 4px;
-            background: var(--color-surface-2);
-            border-radius: 2px;
+            background: var(--border-color);
             outline: none;
+            border-radius: 2px;
+            transition: opacity var(--transition-speed);
         }
-        input[type="range"]::-webkit-slider-thumb {
+        .slider::-webkit-slider-thumb {
             -webkit-appearance: none;
             appearance: none;
             width: 18px;
             height: 18px;
-            background: var(--color-primary);
+            background: var(--primary-color);
+            cursor: pointer;
             border-radius: 50%;
+        }
+        .slider::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            background: var(--primary-color);
             cursor: pointer;
-            transition: var(--transition-fast);
-        }
-        input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.1); }
-        
-        /* --- Video & Timeline --- */
-        #preview-video { width: 100%; display: block; }
-        #custom-timeline {
-            width: 100%;
-            height: 100%;
-            background-color: var(--color-surface);
-            border-radius: 12px;
-            cursor: pointer;
-            border: 1px solid var(--color-border);
+            border-radius: 50%;
+            border: none;
         }
         
-        /* --- Status & Progress --- */
-        #status-bar {
-            position: fixed;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background-color: rgba(30, 30, 30, 0.8);
-            backdrop-filter: blur(10px);
-            padding: 0.75rem 1.5rem;
-            border-radius: 20px;
-            border: 1px solid var(--color-border);
-            text-align: center;
-            opacity: 0;
-            transition: var(--transition-fast);
-        }
-        #status-bar.visible { opacity: 1; }
-        #status-message { margin: 0; font-weight: 500; }
-        #progress-bar {
-            width: 100%;
-            height: 4px;
-            margin-top: 0.5rem;
-            display: block;
-            appearance: none; -webkit-appearance: none;
-        }
-        #progress-bar::-webkit-progress-bar { background-color: var(--color-border); border-radius: 2px; }
-        #progress-bar::-webkit-progress-value { background-color: var(--color-primary); border-radius: 2px; transition: width 0.3s ease; }
-        
-        /* --- Responsive --- */
-        @media (max-width: 1024px) {
-            body { padding: 0.5rem; }
-            .main-layout {
-                grid-template-columns: 1fr;
-                grid-template-rows: auto auto auto auto;
+        /* Utility */
+        .hidden { display: none !important; }
+
+        /* Responsive */
+        @media (max-width: 900px) {
+            body { align-items: flex-start; }
+            .app-container { 
+                flex-direction: column; 
+                height: 100vh;
+                max-height: none;
+                border-radius: 0;
             }
-            .controls-panel { grid-row: 3 / 4; }
-            .video-wrapper { grid-row: 1 / 2; grid-column: 1 / 2; }
-            .timeline-wrapper { grid-row: 2 / 3; grid-column: 1 / 2; }
+            main { flex-direction: column; }
+            .controls-panel {
+                width: 100%;
+                border-left: none;
+                border-top: 1px solid var(--border-color);
+                max-height: 40vh;
+            }
         }
+
     </style>
 </head>
 <body>
 
-    <main id="app">
-        <!-- 1. Initial Dropzone View -->
-        <section id="dropzone">
-            <input type="file" id="file-input" accept="video/mp4,video/webm,video/quicktime" hidden>
-            <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-text-secondary); margin-bottom: 1rem;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-            <p>Drag & Drop a video file, or click to select</p>
-        </section>
+    <div class="app-container">
+        <header>
+            <h1>Silent Clipper</h1>
+        </header>
+        <main>
+            <div class="video-panel">
+                <div class="file-drop-zone" id="fileDropZone">
+                    <input type="file" id="fileInput" accept="video/mp4,video/webm,video/quicktime">
+                    <h2>ビデオファイルをドラッグ＆ドロップ</h2>
+                    <p>またはクリックしてファイルを選択</p>
+                </div>
 
-        <!-- 2. Main Application Layout (hidden by default) -->
-        <div id="main-layout" class="main-layout">
-            <div class="video-wrapper">
-                <video id="preview-video"></video>
+                <div class="video-wrapper" id="videoWrapper">
+                    <video id="videoPlayer" controls></video>
+                    <div class="loader-overlay hidden" id="loaderOverlay">
+                        <div class="spinner"></div>
+                        <p id="progressText">準備中...</p>
+                    </div>
+                </div>
+
+                <canvas id="histogramCanvas"></canvas>
             </div>
-            <div class="timeline-wrapper">
-                <svg id="custom-timeline"></svg>
-            </div>
-            <aside class="controls-panel">
+            <aside class="controls-panel" id="controlsPanel">
+                <h3>設定</h3>
                 <div class="control-group">
-                    <label><span>Threshold</span><span class="value" id="threshold-value">-40 dB</span></label>
-                    <input type="range" id="threshold-slider" min="-60" max="-20" value="-40" step="1">
+                    <label for="thresholdSlider">無音しきい値 <span class="value" id="thresholdValue">-40 dB</span></label>
+                    <input type="range" min="-60" max="-20" value="-40" class="slider" id="thresholdSlider">
                 </div>
                 <div class="control-group">
-                    <label><span>Min Silence Duration</span><span class="value" id="min-silence-value">500 ms</span></label>
-                    <input type="range" id="min-silence-slider" min="100" max="2000" value="500" step="50">
+                    <label for="chunkSizeSlider">解析間隔 <span class="value" id="chunkSizeValue">50 ms</span></label>
+                    <input type="range" min="10" max="200" value="50" step="10" class="slider" id="chunkSizeSlider">
                 </div>
                 <div class="control-group">
-                    <label><span>Padding</span><span class="value" id="padding-value">150 ms</span></label>
-                    <input type="range" id="padding-slider" min="0" max="500" value="150" step="10">
+                    <label for="minSilenceSlider">最小無音長 <span class="value" id="minSilenceValue">500 ms</span></label>
+                    <input type="range" min="100" max="2000" value="500" step="50" class="slider" id="minSilenceSlider">
                 </div>
-                <div class="control-group" style="opacity: 0.5; cursor: not-allowed;">
-                    <label><span>Chunk Size</span><span class="value" id="chunk-size-value">10 ms</span></label>
-                    <input type="range" id="chunk-size-slider" min="10" max="50" value="10" step="1" disabled>
-                    <small style="color: var(--color-text-secondary); font-size: 0.75rem;">Lower is more accurate but slower. (Fixed at 10ms for performance)</small>
+                <div class="control-group">
+                    <label for="paddingSlider">マージン <span class="value" id="paddingValue">100 ms</span></label>
+                    <input type="range" min="0" max="500" value="100" step="10" class="slider" id="paddingSlider">
                 </div>
             </aside>
-        </div>
+        </main>
+    </div>
 
-        <!-- 3. Status Bar -->
-        <div id="status-bar">
-            <p id="status-message"></p>
-            <progress id="progress-bar" value="0" max="100" style="display: none;"></progress>
-        </div>
-    </main>
-    
-    <!-- 
-    ================================================================
-    Web Worker (Analyzer)
-    ================================================================
-    -->
-    <script id="analyzer-worker" type="javascript/worker">
-        let wasm;
-        
-        // This is a placeholder for the Base64 encoded WASM module.
-        // In a real build process, this would be auto-populated.
-        // This small, valid WASM module exports 'add(a,b)' and memory.
-        const wasmBase64 = "AGFzbQEAAAABBgFgAXwBfAABAwIBAAUDAgABBggBBwJtZW1vcnkCAAEAA2FkZAAACgYBAAAGACAAQQAhAAYALABAAQAL";
-
-        async function initWasm() {
-            if (wasm) return;
-            const wasmBinary = Uint8Array.from(atob(wasmBase64), c => c.charCodeAt(0));
-            const wasmModule = await WebAssembly.compile(wasmBinary);
-            const { instance } = await WebAssembly.instantiate(wasmModule, {
-                env: { memory: new WebAssembly.Memory({ initial: 10 }) }
-            });
-            wasm = instance.exports;
-            // In a real module, you'd have functions like:
-            // wasm.init_panic_hook();
-            // wasm.analyze(...);
-        }
-
-        async function decodeAudioData(file) {
-            const arrayBuffer = await file.arrayBuffer();
-            const ctx = new OfflineAudioContext(1, 1, 48000); // Use a fixed, high sample rate
-            return ctx.decodeAudioData(arrayBuffer);
-        }
-
-        /**
-         * A mock analysis function that simulates the real WASM call.
-         * This is where the actual high-performance Rust code would run.
-         */
-        function mockAnalyze(audioData, sampleRate, settings) {
-             const duration = audioData.length / sampleRate;
-             const audibleIntervals = [];
-             let lastEnd = 0;
-
-             // Simulate finding silent parts
-             for (let i = 0; i < 10; i++) {
-                 const start = lastEnd + Math.random() * (duration / 20);
-                 const end = start + Math.random() * (duration / 10);
-                 if (end > duration) break;
-                 
-                 // Apply padding (virtually)
-                 const paddedStart = Math.max(0, start - (settings.padding / 1000));
-                 const paddedEnd = Math.min(duration, end + (settings.padding / 1000));
-
-                 if (paddedStart > lastEnd) {
-                    audibleIntervals.push([lastEnd, paddedStart]);
-                 }
-                 lastEnd = paddedEnd;
-             }
-             if (lastEnd < duration) {
-                 audibleIntervals.push([lastEnd, duration]);
-             }
-             return { audibleIntervals };
-        }
-
-        self.onmessage = async (event) => {
-            try {
-                const { file, settings } = event.data;
-                await initWasm();
-
-                postMessage({ type: 'progress', message: 'Decoding audio...', progress: 10 });
-                const audioBuffer = await decodeAudioData(file);
-                const audioData = audioBuffer.getChannelData(0);
-
-                postMessage({ type: 'progress', message: 'Analyzing for silence...', progress: 40 });
-                
-                // TODO: Replace mockAnalyze with real WASM call
-                // const wasmResult = wasm.analyze(audioData, audioBuffer.sampleRate, settings...);
-                const { audibleIntervals } = mockAnalyze(audioData, audioBuffer.sampleRate, settings);
-
-                // Simulate processing time
-                await new Promise(res => setTimeout(res, 500 + Math.random() * 1000));
-
-                postMessage({ type: 'progress', message: 'Analysis complete', progress: 100 });
-                postMessage({ type: 'result', audibleIntervals });
-
-            } catch (error) {
-                console.error('Worker error:', error);
-                postMessage({ type: 'error', message: `Analysis failed: ${error.message}` });
-            }
-        };
-    </script>
-    
-    <!-- 
-    ================================================================
-    Main Application Logic (TypeScript-in-JS style)
-    ================================================================
-    -->
     <script type="module">
-        // --- DOM Elements ---
-        const dropzone = document.getElementById('dropzone');
-        const fileInput = document.getElementById('file-input');
-        const mainLayout = document.getElementById('main-layout');
-        const videoEl = document.getElementById('preview-video');
-        const timelineEl = document.getElementById('custom-timeline');
-        const statusBar = document.getElementById('status-bar');
-        const statusMessage = document.getElementById('status-message');
-        const progressBar = document.getElementById('progress-bar');
-        
-        const sliders = {
-            threshold: document.getElementById('threshold-slider'),
-            minSilence: document.getElementById('min-silence-slider'),
-            padding: document.getElementById('padding-slider'),
-        };
-        const values = {
-            threshold: document.getElementById('threshold-value'),
-            minSilence: document.getElementById('min-silence-value'),
-            padding: document.getElementById('padding-value'),
-        };
+    // ===================================================================================
+    // --- TYPE DEFINITIONS (JSDoc for TypeScript-like type safety) ---
+    // ===================================================================================
 
-        // --- State ---
-        let state = {
-            file: null,
-            audibleIntervals: [],
-            currentIntervalIndex: 0,
-            isPlaying: false,
-            isSeeking: false,
-            totalAudibleDuration: 0,
-        };
-        let analyzerWorker;
-        let debounceTimer;
+    /**
+     * @typedef {object} AudioChunk
+     * @property {number} volume - The volume of the chunk in dBFS.
+     */
 
-        // --- Initialization ---
-        function init() {
-            setupWorker();
-            setupEventListeners();
-        }
+    /**
+     * @typedef {object} TimeRange
+     * @property {number} start - Start time in seconds.
+     * @property {number} end - End time in seconds.
+     */
 
-        function setupWorker() {
-            const workerScript = document.getElementById('analyzer-worker').textContent;
-            const workerBlob = new Blob([workerScript], { type: 'application/javascript' });
-            analyzerWorker = new Worker(URL.createObjectURL(workerBlob));
-            analyzerWorker.onmessage = handleWorkerMessage;
-        }
-        
-        function setupEventListeners() {
-            dropzone.addEventListener('click', () => fileInput.click());
-            fileInput.addEventListener('change', (e) => handleFileSelect(e.target.files));
+    /**
+     * @typedef {object} AnalysisParams
+     * @property {number} threshold
+     * @property {number} chunkSize
+     * @property {number} minSilenceDuration
+     * @property {number} padding
+     */
+    
+    // ===================================================================================
+    // --- APPLICATION STATE ---
+    // ===================================================================================
+    
+    const state = {
+        /** @type {File | null} */
+        videoFile: null,
+        /** @type {string | null} */
+        videoObjectURL: null,
+        /** @type {Float32Array | null} */
+        audioData: null,
+        /** @type {number} */
+        sampleRate: 0,
+        /** @type {TimeRange[]} */
+        soundZones: [],
+        /** @type {boolean} */
+        isProcessing: false,
+        /** @type {number} */
+        currentSoundZoneIndex: 0,
+    };
+
+    // ===================================================================================
+    // --- DOM ELEMENTS ---
+    // ===================================================================================
+    
+    const dom = {
+        fileDropZone: document.getElementById('fileDropZone'),
+        fileInput: document.getElementById('fileInput'),
+        videoWrapper: document.getElementById('videoWrapper'),
+        videoPlayer: document.getElementById('videoPlayer'),
+        loaderOverlay: document.getElementById('loaderOverlay'),
+        progressText: document.getElementById('progressText'),
+        histogramCanvas: document.getElementById('histogramCanvas'),
+        controlsPanel: document.getElementById('controlsPanel'),
+        // Sliders
+        thresholdSlider: document.getElementById('thresholdSlider'),
+        chunkSizeSlider: document.getElementById('chunkSizeSlider'),
+        minSilenceSlider: document.getElementById('minSilenceSlider'),
+        paddingSlider: document.getElementById('paddingSlider'),
+        // Slider value displays
+        thresholdValue: document.getElementById('thresholdValue'),
+        chunkSizeValue: document.getElementById('chunkSizeValue'),
+        minSilenceValue: document.getElementById('minSilenceValue'),
+        paddingValue: document.getElementById('paddingValue'),
+    };
+    
+    const histogramCtx = dom.histogramCanvas.getContext('2d');
+    
+    // ===================================================================================
+    // --- WEB WORKER INITIALIZATION ---
+    // ===================================================================================
+
+    // NOTE: This is the modern way to embed worker code in a single file without
+    // creating a separate .js file. It's clean and efficient.
+    const workerCode = `
+        // --- WASM LOADER (inside worker) ---
+        // In a real project, the .wasm file would be fetched. For single-file deployment,
+        // it could be base64 encoded and embedded as a string constant.
+        let wasm;
+        async function loadWasm() {
+            // This is a placeholder for loading your compiled Rust/C++ WASM module.
+            // const wasmCode = await fetch('audio_processor.wasm');
+            // const wasmModule = await WebAssembly.instantiateStreaming(wasmCode);
+            // wasm = wasmModule.instance.exports;
             
-            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-                dropzone.addEventListener(eventName, preventDefaults, false);
-            });
-            ['dragenter', 'dragover'].forEach(eventName => {
-                dropzone.addEventListener(eventName, () => dropzone.classList.add('dragging'), false);
-            });
-            ['dragleave', 'drop'].forEach(eventName => {
-                dropzone.addEventListener(eventName, () => dropzone.classList.remove('dragging'), false);
-            });
-            dropzone.addEventListener('drop', handleFileDrop, false);
-
-            Object.values(sliders).forEach(slider => {
-                slider.addEventListener('input', handleSettingsChange);
-            });
-            
-            videoEl.addEventListener('play', () => { state.isPlaying = true; });
-            videoEl.addEventListener('pause', () => { state.isPlaying = false; });
-            videoEl.addEventListener('ended', () => { state.isPlaying = false; });
-            
-            timelineEl.addEventListener('click', handleTimelineSeek);
-        }
-        
-        // --- File Handling ---
-        function preventDefaults(e) {
-            e.preventDefault();
-            e.stopPropagation();
-        }
-        
-        function handleFileDrop(e) {
-            handleFileSelect(e.dataTransfer.files);
-        }
-        
-        function handleFileSelect(files) {
-            if (files.length === 0) return;
-            const file = files[0];
-            if (!file.type.startsWith('video/')) {
-                showStatus('Error: Please select a valid video file.', 'error', 5000);
-                return;
-            }
-            state.file = file;
-            startAnalysis();
-        }
-
-        // --- Analysis ---
-        function getSettings() {
-            return {
-                threshold: parseInt(sliders.threshold.value, 10),
-                minSilenceDuration: parseInt(sliders.minSilence.value, 10),
-                padding: parseInt(sliders.padding.value, 10),
-                chunkSize: 10, // Fixed
+            // For now, we'll simulate the WASM with a JS function.
+            wasm = {
+                // This function simulates the high-performance RMS calculation from WASM.
+                calculate_rms_dbfs_for_chunks: (audioData, sampleRate, chunkSizeMs) => {
+                    const chunkSamples = Math.floor(sampleRate * (chunkSizeMs / 1000));
+                    const numChunks = Math.floor(audioData.length / chunkSamples);
+                    const volumes = new Float32Array(numChunks);
+                    for (let i = 0; i < numChunks; i++) {
+                        let sumOfSquares = 0;
+                        const start = i * chunkSamples;
+                        const end = start + chunkSamples;
+                        for (let j = start; j < end; j++) {
+                            sumOfSquares += audioData[j] * audioData[j];
+                        }
+                        const rms = Math.sqrt(sumOfSquares / chunkSamples);
+                        volumes[i] = 20 * Math.log10(rms);
+                    }
+                    return volumes;
+                }
             };
+            console.log("WASM module (simulated) loaded in worker.");
         }
         
-        function startAnalysis() {
-            if (!state.file) return;
-            
-            showStatus('Starting analysis...', 'info');
-            progressBar.style.display = 'block';
-            progressBar.value = 0;
-            
-            // Set up video source for metadata loading
-            const videoURL = URL.createObjectURL(state.file);
-            videoEl.src = videoURL;
-            videoEl.load();
-
-            analyzerWorker.postMessage({ file: state.file, settings: getSettings() });
-        }
-        
-        function handleWorkerMessage(e) {
-            const { type, message, progress, audibleIntervals, error } = e.data;
-            switch (type) {
-                case 'progress':
-                    showStatus(message, 'info');
-                    progressBar.value = progress;
-                    break;
-                case 'result':
-                    hideStatus();
-                    progressBar.style.display = 'none';
-                    state.audibleIntervals = audibleIntervals;
-                    state.totalAudibleDuration = audibleIntervals.reduce((sum, [start, end]) => sum + (end - start), 0);
-                    showMainLayout();
-                    drawTimeline();
-                    setupPreviewPlayback();
-                    break;
-                case 'error':
-                    showStatus(`Error: ${message}`, 'error', 5000);
-                    progressBar.style.display = 'none';
-                    break;
-            }
-        }
-
-        function handleSettingsChange(e) {
-            const id = e.target.id;
-            if (id === 'threshold-slider') values.threshold.textContent = `${e.target.value} dB`;
-            if (id === 'min-silence-slider') values.minSilence.textContent = `${e.target.value} ms`;
-            if (id === 'padding-slider') values.padding.textContent = `${e.target.value} ms`;
-
-            clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(() => {
-                showStatus('Re-analyzing with new settings...', 'info');
-                startAnalysis();
-            }, 500);
-        }
-
-        // --- UI Management ---
-        function showStatus(message, type = 'info', duration = 0) {
-            statusMessage.textContent = message;
-            statusBar.className = `visible ${type}`;
-            if (duration > 0) {
-                setTimeout(hideStatus, duration);
-            }
-        }
-
-        function hideStatus() {
-            statusBar.classList.remove('visible');
-        }
-
-        function showMainLayout() {
-            dropzone.style.display = 'none';
-            mainLayout.classList.add('visible');
-        }
-
-        // --- Timeline & Playback ---
-        function drawTimeline() {
-            const duration = videoEl.duration;
-            if (!duration || !isFinite(duration)) return;
-            
-            const width = timelineEl.clientWidth;
-            const height = timelineEl.clientHeight;
-            let html = `<rect x="0" y="0" width="${width}" height="${height}" fill="var(--color-surface-2)" />`;
-
-            state.audibleIntervals.forEach(([start, end]) => {
-                const x = (start / duration) * width;
-                const w = ((end - start) / duration) * width;
-                html += `<rect x="${x}" y="0" width="${w}" height="${height}" fill="var(--color-primary)" />`;
-            });
-
-            // Playhead
-            html += `<line id="playhead" x1="0" y1="0" x2="0" y2="${height}" stroke="${var(--color-text)}" stroke-width="2" />`;
-
-            timelineEl.innerHTML = html;
-        }
-        
-        function updatePlayhead() {
-            if (!videoEl.duration) return;
-            const playhead = document.getElementById('playhead');
-            if (!playhead) return;
-            
-            const audiblePlayedTime = state.audibleIntervals
-                .slice(0, state.currentIntervalIndex)
-                .reduce((sum, [start, end]) => sum + (end - start), 0)
-                + (videoEl.currentTime - state.audibleIntervals[state.currentIntervalIndex][0]);
-            
-            const progress = audiblePlayedTime / state.totalAudibleDuration;
-            const x = progress * timelineEl.clientWidth;
-
-            playhead.setAttribute('x1', x);
-            playhead.setAttribute('x2', x);
-        }
-        
-        function setupPreviewPlayback() {
-            state.currentIntervalIndex = 0;
-            videoEl.currentTime = state.audibleIntervals[0][0];
-            
-            videoEl.ontimeupdate = () => {
-                if (state.isSeeking) return;
+        self.onmessage = async (e) => {
+            const { type, payload } = e.data;
+            if (type === 'ANALYZE') {
+                if (!wasm) await loadWasm();
                 
-                const [start, end] = state.audibleIntervals[state.currentIntervalIndex];
+                self.postMessage({ type: 'PROGRESS', payload: { text: '音声データをデコード中...' } });
+
+                // 1. Decode Audio Data
+                // OfflineAudioContext is the fastest way to decode audio in the background.
+                const audioCtx = new OfflineAudioContext(1, payload.audioData.length, payload.sampleRate);
+                const source = audioCtx.createBufferSource();
+                source.buffer = audioCtx.createBuffer(1, payload.audioData.length, payload.sampleRate);
+                source.buffer.copyToChannel(payload.audioData, 0);
                 
-                if (videoEl.currentTime >= end) {
-                    state.currentIntervalIndex++;
-                    if (state.currentIntervalIndex >= state.audibleIntervals.length) {
-                        videoEl.pause();
-                        state.currentIntervalIndex = 0;
-                        videoEl.currentTime = state.audibleIntervals[0][0];
-                    } else {
-                        videoEl.currentTime = state.audibleIntervals[state.currentIntervalIndex][0];
+                const decodedBuffer = await audioCtx.startRendering();
+                const decodedAudioData = decodedBuffer.getChannelData(0);
+
+                self.postMessage({ type: 'PROGRESS', payload: { text: '音量を解析中 (WASM)...' } });
+                
+                // 2. Perform high-speed analysis via WASM
+                const volumes = wasm.calculate_rms_dbfs_for_chunks(
+                    decodedAudioData,
+                    payload.sampleRate,
+                    payload.params.chunkSize
+                );
+
+                // Send histogram data back to the main thread
+                self.postMessage({ type: 'HISTOGRAM_DATA', payload: volumes });
+
+                self.postMessage({ type: 'PROGRESS', payload: { text: '無音区間を検出中...' } });
+
+                // 3. Identify silent chunks
+                const isSilent = new Uint8Array(volumes.length);
+                for (let i = 0; i < volumes.length; i++) {
+                    if (volumes[i] < payload.params.threshold) {
+                        isSilent[i] = 1;
                     }
                 }
-                updatePlayhead();
-            };
-        }
+                
+                // 4. Merge silent chunks and create sound zones
+                const minSilenceChunks = Math.ceil(payload.params.minSilenceDuration / payload.params.chunkSize);
+                const paddingSeconds = payload.params.padding / 1000;
+                const chunkSizeSeconds = payload.params.chunkSize / 1000;
 
-        function handleTimelineSeek(e) {
-            const bounds = timelineEl.getBoundingClientRect();
-            const progress = (e.clientX - bounds.left) / bounds.width;
-            
-            const targetAudibleTime = progress * state.totalAudibleDuration;
-            let accumulatedTime = 0;
+                const soundZones = [];
+                let lastSoundEnd = 0;
+                let silentChunkCount = 0;
 
-            for(let i=0; i<state.audibleIntervals.length; i++) {
-                const [start, end] = state.audibleIntervals[i];
-                const duration = end - start;
-                if (accumulatedTime + duration >= targetAudibleTime) {
-                    const timeIntoInterval = targetAudibleTime - accumulatedTime;
-                    state.currentIntervalIndex = i;
-                    videoEl.currentTime = start + timeIntoInterval;
-                    break;
+                for (let i = 0; i < isSilent.length; i++) {
+                    if (isSilent[i]) {
+                        silentChunkCount++;
+                    } else {
+                        if (silentChunkCount >= minSilenceChunks) {
+                            const silenceStart = (i - silentChunkCount) * chunkSizeSeconds;
+                            if (lastSoundEnd < silenceStart) {
+                                soundZones.push({
+                                    start: Math.max(0, lastSoundEnd - paddingSeconds),
+                                    end: Math.min(silenceStart + paddingSeconds, (i * chunkSizeSeconds))
+                                });
+                            }
+                        }
+                        lastSoundEnd = (i + 1) * chunkSizeSeconds;
+                        silentChunkCount = 0;
+                    }
                 }
-                accumulatedTime += duration;
+                
+                // Add the final sound zone if any
+                if (lastSoundEnd < (volumes.length * chunkSizeSeconds)) {
+                     soundZones.push({
+                         start: Math.max(0, lastSoundEnd - paddingSeconds),
+                         end: (volumes.length * chunkSizeSeconds)
+                     });
+                }
+                
+                // Merge overlapping zones
+                if (soundZones.length > 0) {
+                    const mergedZones = [soundZones[0]];
+                    for(let i = 1; i < soundZones.length; i++) {
+                        const lastZone = mergedZones[mergedZones.length - 1];
+                        const currentZone = soundZones[i];
+                        if (currentZone.start <= lastZone.end) {
+                            lastZone.end = Math.max(lastZone.end, currentZone.end);
+                        } else {
+                            mergedZones.push(currentZone);
+                        }
+                    }
+                    self.postMessage({ type: 'ANALYSIS_COMPLETE', payload: { soundZones: mergedZones } });
+                } else {
+                     self.postMessage({ type: 'ANALYSIS_COMPLETE', payload: { soundZones: [] } });
+                }
+            }
+        };
+    `;
+    const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
+    const worker = new Worker(URL.createObjectURL(workerBlob));
+
+    // ===================================================================================
+    // --- MAIN THREAD LOGIC ---
+    // ===================================================================================
+
+    /**
+     * Handles file selection (drag-drop or click)
+     * @param {File} file The selected video file.
+     */
+    async function handleFileSelect(file) {
+        if (!file || !file.type.startsWith('video/')) {
+            alert('有効なビデオファイルを選択してください。');
+            return;
+        }
+        
+        state.videoFile = file;
+        setProcessingState(true, 'ファイルを読み込み中...');
+
+        if (state.videoObjectURL) {
+            URL.revokeObjectURL(state.videoObjectURL);
+        }
+        state.videoObjectURL = URL.createObjectURL(file);
+        dom.videoPlayer.src = state.videoObjectURL;
+
+        dom.fileDropZone.classList.add('hidden');
+        dom.videoWrapper.style.display = 'block';
+        
+        try {
+            const fileBuffer = await file.arrayBuffer();
+            // Using a temporary AudioContext to decode audio data fast on the main thread
+            // just to get the raw data. The heavy lifting happens in the worker.
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const audioBuffer = await audioContext.decodeAudioData(fileBuffer);
+            
+            state.audioData = audioBuffer.getChannelData(0);
+            state.sampleRate = audioBuffer.sampleRate;
+            
+            triggerAnalysis();
+        } catch (err) {
+            console.error('Error processing audio:', err);
+            alert('音声トラックの処理に失敗しました。ファイルが破損しているか、サポートされていない形式の可能性があります。');
+            setProcessingState(false);
+        }
+    }
+    
+    /**
+     * Triggers the analysis in the Web Worker
+     */
+    function triggerAnalysis() {
+        if (!state.audioData || state.isProcessing) return;
+        
+        setProcessingState(true, '解析の準備中...');
+        
+        const params = {
+            threshold: parseFloat(dom.thresholdSlider.value),
+            chunkSize: parseInt(dom.chunkSizeSlider.value, 10),
+            minSilenceDuration: parseInt(dom.minSilenceSlider.value, 10),
+            padding: parseInt(dom.paddingSlider.value, 10),
+        };
+
+        // Transfer AudioData to worker to avoid copying large amounts of data
+        worker.postMessage({
+            type: 'ANALYZE',
+            payload: {
+                audioData: state.audioData,
+                sampleRate: state.sampleRate,
+                params: params,
+            }
+        }, [state.audioData.buffer]);
+    }
+    
+    /**
+     * Updates the UI to reflect processing state
+     * @param {boolean} isProcessing
+     * @param {string} [text='']
+     */
+    function setProcessingState(isProcessing, text = '') {
+        state.isProcessing = isProcessing;
+        dom.loaderOverlay.classList.toggle('hidden', !isProcessing);
+        dom.progressText.textContent = text;
+        
+        // Disable sliders during processing
+        [dom.thresholdSlider, dom.chunkSizeSlider, dom.minSilenceSlider, dom.paddingSlider]
+            .forEach(slider => slider.disabled = isProcessing);
+    }
+    
+    /**
+     * Draws the volume histogram on the canvas
+     * @param {Float32Array} volumes 
+     */
+    function drawHistogram(volumes) {
+        const { width, height } = dom.histogramCanvas;
+        histogramCtx.clearRect(0, 0, width, height);
+
+        const barWidth = width / volumes.length;
+        const threshold = parseFloat(dom.thresholdSlider.value);
+        
+        // Define a gradient for the bars
+        const gradient = histogramCtx.createLinearGradient(0, 0, 0, height);
+        gradient.addColorStop(0, 'rgba(10, 132, 255, 0.8)'); // Primary color
+        gradient.addColorStop(1, 'rgba(10, 132, 255, 0.3)');
+        
+        const silentColor = 'rgba(255, 80, 80, 0.5)'; // A color for silent parts
+        
+        for (let i = 0; i < volumes.length; i++) {
+            const db = volumes[i];
+            // Normalize dB to a 0-1 range. Assume a range of -80dB to 0dB.
+            const normalizedHeight = (db + 80) / 80;
+            const barHeight = Math.max(1, normalizedHeight * height);
+
+            histogramCtx.fillStyle = db < threshold ? silentColor : gradient;
+            histogramCtx.fillRect(i * barWidth, height - barHeight, barWidth, barHeight);
+        }
+    }
+
+    /**
+     * Handles the preview playback logic
+     */
+    function handleTimeUpdate() {
+        if (state.soundZones.length === 0 || dom.videoPlayer.paused) return;
+
+        const currentTime = dom.videoPlayer.currentTime;
+        const currentZone = state.soundZones[state.currentSoundZoneIndex];
+
+        if (currentTime >= currentZone.end) {
+            const nextZoneIndex = state.currentSoundZoneIndex + 1;
+            if (nextZoneIndex < state.soundZones.length) {
+                state.currentSoundZoneIndex = nextZoneIndex;
+                dom.videoPlayer.currentTime = state.soundZones[nextZoneIndex].start;
+                dom.videoPlayer.play();
+            } else {
+                dom.videoPlayer.pause();
+                dom.videoPlayer.currentTime = state.soundZones[0].start; // Loop back
+                state.currentSoundZoneIndex = 0;
             }
         }
+    }
+    
+    // ===================================================================================
+    // --- EVENT LISTENERS ---
+    // ===================================================================================
 
-        // --- Start the app ---
-        init();
+    // File Drop Zone events
+    dom.fileDropZone.addEventListener('click', () => dom.fileInput.click());
+    dom.fileInput.addEventListener('change', (e) => handleFileSelect(e.target.files[0]));
+    dom.fileDropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dom.fileDropZone.classList.add('dragover');
+    });
+    dom.fileDropZone.addEventListener('dragleave', () => dom.fileDropZone.classList.remove('dragover'));
+    dom.fileDropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dom.fileDropZone.classList.remove('dragover');
+        handleFileSelect(e.dataTransfer.files[0]);
+    });
+    
+    // Worker message handler
+    worker.onmessage = (e) => {
+        const { type, payload } = e.data;
+        if (type === 'PROGRESS') {
+            setProcessingState(true, payload.text);
+        } else if (type === 'HISTOGRAM_DATA') {
+            drawHistogram(payload);
+        } else if (type === 'ANALYSIS_COMPLETE') {
+            // Restore audio data buffer after transfer
+            state.audioData = new Float32Array(e.data.payload.audioDataBuffer);
+            
+            state.soundZones = payload.soundZones;
+            setProcessingState(false);
+            
+            if (state.soundZones.length > 0) {
+                dom.videoPlayer.currentTime = state.soundZones[0].start;
+                state.currentSoundZoneIndex = 0;
+                console.log('Analysis complete. Sound zones:', state.soundZones);
+            } else {
+                alert('解析の結果、音声区間が見つかりませんでした。');
+            }
+        }
+    };
+    
+    // Slider events
+    const sliders = [
+        { el: dom.thresholdSlider, elValue: dom.thresholdValue, unit: ' dB' },
+        { el: dom.chunkSizeSlider, elValue: dom.chunkSizeValue, unit: ' ms' },
+        { el: dom.minSilenceSlider, elValue: dom.minSilenceValue, unit: ' ms' },
+        { el: dom.paddingSlider, elValue: dom.paddingValue, unit: ' ms' },
+    ];
+    sliders.forEach(({el, elValue, unit}) => {
+        el.addEventListener('input', () => {
+            elValue.textContent = `${el.value}${unit}`;
+        });
+        // Re-analyze when user stops dragging the slider
+        el.addEventListener('change', triggerAnalysis);
+    });
+    
+    // Video player events
+    dom.videoPlayer.addEventListener('timeupdate', handleTimeUpdate);
+    dom.videoPlayer.addEventListener('seeking', () => {
+        // Find the correct sound zone to be in after user seeks
+        const currentTime = dom.videoPlayer.currentTime;
+        const zoneIndex = state.soundZones.findIndex(zone => currentTime >= zone.start && currentTime < zone.end);
+        state.currentSoundZoneIndex = (zoneIndex !== -1) ? zoneIndex : 0;
+    });
+
     </script>
-
 </body>
 </html>
